@@ -1,0 +1,34 @@
+control_server:
+  ros__parameters:
+    use_sim_time: false
+
+    # Satu Titan pada CAN ID 42. Ubah can_id agar sama dengan konfigurasi
+    # DIP switch / CAN ID pada Titan yang akan diuji.
+    titan:
+      enabled: true
+      sensors: ["titan0"]
+      titan0:
+        can_id: 42
+        motor_freq: 15600
+        encoder_rate_hz: 20
+        motor_update_rate_hz: 50
+        enable_freshness: true
+
+        # Label fisik Titan sama dengan indeks driver: M1 = m_1.
+        # dist_per_tick 1.0 membuat nilai /encoder berupa hitungan tick mentah.
+        m_0:
+          encoder_mode: "quadrature"
+          dist_per_tick: 1.0
+          invert_motor: false
+          invert_encoder: false
+          invert_rpm: false
+
+        m_1:
+          encoder_mode: "quadrature"
+          dist_per_tick: 1.0
+        m_2:
+          encoder_mode: "quadrature"
+          dist_per_tick: 1.0
+        m_3:
+          encoder_mode: "quadrature"
+          dist_per_tick: 1.0
