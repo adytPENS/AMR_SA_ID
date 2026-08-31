@@ -10,5 +10,5 @@ wheel_odometry:
     use_imu_yaw: true
     imu_topic: "/imu"
     max_imu_delta: 0.50
-    # navX bertambah negatif saat robot berputar kiri; ROS memakai CCW positif.
-    imu_yaw_sign: -1.0
+    # Hasil uji fisik: putar kiri (CCW) menghasilkan yaw positif sesuai ROS.
+    imu_yaw_sign: 1.0

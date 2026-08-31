@@ -35,7 +35,7 @@ class WheelOdometry(Node):
         self.declare_parameter('use_imu_yaw', True)
         self.declare_parameter('imu_topic', '/imu')
         self.declare_parameter('max_imu_delta', 0.50)
-        self.declare_parameter('imu_yaw_sign', -1.0)
+        self.declare_parameter('imu_yaw_sign', 1.0)
 
         sensor = self.get_parameter('sensor').value
         self.track_width = float(self.get_parameter('track_width').value)
