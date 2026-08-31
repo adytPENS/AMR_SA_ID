@@ -15,6 +15,9 @@ Kontrol:
 Terminal tidak menyediakan event key-release. Saat tombol ditahan, sistem
 operasi mengirim key-repeat; bila repeat berhenti selama release_timeout,
 program otomatis mengirim nol ke seluruh motor.
+
+PID speed encoder M0-M3 aktif secara default. Gunakan --no-pid hanya untuk
+diagnosis open-loop.
 """
 
 import argparse
@@ -120,8 +123,12 @@ def parse_args():
                         help='target tombol G dalam meter (default 1.0)')
     parser.add_argument('--distance-timeout', type=float, default=20.0,
                         help='safety timeout gerak G dalam detik (default 20)')
-    parser.add_argument('--pid', action='store_true',
-                        help='aktifkan PI speed independen M0-M3 dari encoder')
+    pid_group = parser.add_mutually_exclusive_group()
+    pid_group.add_argument('--pid', dest='pid', action='store_true',
+                           help='aktifkan PID speed (default)')
+    pid_group.add_argument('--no-pid', dest='pid', action='store_false',
+                           help='diagnosis open-loop tanpa PID')
+    parser.set_defaults(pid=True)
     parser.add_argument('--speed-at-full-duty', type=float, default=0.75,
                         help='estimasi kecepatan roda pada duty 1.0 (m/s)')
     parser.add_argument('--pid-kp', type=float, default=0.25)
@@ -174,6 +181,7 @@ def main() -> None:
     last_progress = 0.0
     last_progress_time = 0.0
     next_progress_log = 0.10
+    pid_feedback_warned = False
 
     try:
         tty.setcbreak(sys.stdin.fileno())
@@ -275,7 +283,14 @@ def main() -> None:
                 command = (0.0, 0.0, 0.0, 0.0)
 
             # Publish berulang pada sekitar 50 Hz untuk watchdog Titan.
-            node.command(command)
+            accepted = node.command(command)
+            if not accepted:
+                if not pid_feedback_warned:
+                    node.get_logger().error(
+                        'Gerak ditolak: feedback encoder PID belum lengkap/stale')
+                    pid_feedback_warned = True
+            else:
+                pid_feedback_warned = False
             if command != last_sent:
                 if distance_active:
                     label = f'G ({args.distance:.2f} m)'
