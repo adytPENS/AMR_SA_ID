@@ -1,4 +1,6 @@
-# Navigasi Waypoint Tanpa SLAM
+# Navigasi Waypoint Tanpa SLAM — Bahasa Indonesia
+
+English version: [WAYPOINT_NAVIGATION_GUIDE_EN.md](WAYPOINT_NAVIGATION_GUIDE_EN.md)
 
 Program ini ditujukan untuk pembelajaran dan tugas ketika koordinat titik
 diberikan oleh juri. Robot memakai pose lokal dari encoder dan IMU, lalu
