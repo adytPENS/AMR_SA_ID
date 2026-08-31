@@ -1,0 +1,33 @@
+# Pilih salah satu:
+#   differential
+#   differential_all_terrain
+#   mecanum
+#   x_drive
+drive:
+  model: differential
+
+  # Semua ukuran dalam meter dan diukur dari titik tengah roda.
+  wheel_diameter: 0.12
+  track_width: 0.35
+  wheelbase: 0.29
+
+  # Hanya digunakan untuk mecanum: x atau o.
+  mecanum_roller_pattern: x
+
+  # Batas target linear permukaan roda.
+  max_wheel_speed: 0.75
+
+# Urutan fisik robot ini. Ubah jika wiring base lain berbeda.
+motors:
+  order: [front_right, rear_right, front_left, rear_left]
+  titan_channels: [0, 1, 2, 3]
+  electrical_polarity: [-1.0, -1.0, 1.0, 1.0]
+
+speed_pid:
+  enabled: true
+  kp: 0.25
+  ki: 0.10
+  kd: 0.0
+  integral_limit: 0.50
+  feedback_timeout: 0.30
+  duty_limit: 0.70
