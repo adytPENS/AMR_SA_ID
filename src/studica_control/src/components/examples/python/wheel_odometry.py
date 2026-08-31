@@ -35,6 +35,7 @@ class WheelOdometry(Node):
         self.declare_parameter('use_imu_yaw', True)
         self.declare_parameter('imu_topic', '/imu')
         self.declare_parameter('max_imu_delta', 0.50)
+        self.declare_parameter('imu_yaw_sign', -1.0)
 
         sensor = self.get_parameter('sensor').value
         self.track_width = float(self.get_parameter('track_width').value)
@@ -46,6 +47,7 @@ class WheelOdometry(Node):
         self.use_imu_yaw = bool(self.get_parameter('use_imu_yaw').value)
         imu_topic = self.get_parameter('imu_topic').value
         self.max_imu_delta = float(self.get_parameter('max_imu_delta').value)
+        self.imu_yaw_sign = float(self.get_parameter('imu_yaw_sign').value)
 
         self.encoder_values: List[Optional[float]] = [None] * 4
         self.previous_values: Optional[List[float]] = None
@@ -154,7 +156,7 @@ class WheelOdometry(Node):
                     self.imu_yaw - self.previous_imu_yaw)
                 self.previous_imu_yaw = self.imu_yaw
                 if abs(imu_delta) <= self.max_imu_delta:
-                    angular_distance = imu_delta
+                    angular_distance = self.imu_yaw_sign * imu_delta
                 else:
                     self.get_logger().warning(
                         f'Lompatan yaw IMU diabaikan: {imu_delta:.3f} rad',
