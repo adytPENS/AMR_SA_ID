@@ -118,6 +118,52 @@ ros2 service call /waypoint_navigator/start \
   std_srvs/srv/Trigger "{}"
 ```
 
+## Physical start button
+
+In competition mode, all ROS nodes should already be running while the robot
+remains `ARMED / STOPPED`. The physical button does not boot ROS from scratch;
+it triggers this sequence:
+
+```text
+press START -> debounce -> validate odometry and LiDAR -> reset odometry
+             -> run the configured A/B/C/D sequence
+```
+
+Configure the selected VMX DIO channel in `titan_m1_test.yaml`:
+
+```yaml
+dio:
+  enabled: true
+  sensors: ["start_button"]
+  start_button:
+    pin: 0              # replace with the actual DIO channel
+    type: "input"
+    interrupt_edge: "rising"
+    debounce_ms: 250
+```
+
+Enable the button subscriber in `waypoints.yaml`:
+
+```yaml
+start_button:
+  enabled: true
+  topic: "/start_button/state"
+  active_high: true     # use false for active-low wiring
+  debounce_ms: 250
+```
+
+Never connect 12 V to a DIO input. Follow the VMX2 electrical specification
+for input wiring and the required pull-up or pull-down resistor. Verify the
+button before enabling motor motion:
+
+```bash
+ros2 topic echo /start_button/state
+```
+
+The value must change when the button is pressed and return when released. A
+physical emergency stop that disables actuator power is still recommended;
+the start button is not an emergency stop.
+
 Emergency stop from any ROS terminal:
 
 ```bash

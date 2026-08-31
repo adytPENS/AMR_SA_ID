@@ -10,6 +10,17 @@ control_server:
       topic: "imu"
       frame_id: "imu_link"
 
+    # Tombol start fisik (opsional). Ubah pin sesuai kanal DIO yang benar,
+    # lalu ubah enabled menjadi true setelah wiring diverifikasi.
+    dio:
+      enabled: false
+      sensors: ["start_button"]
+      start_button:
+        pin: 0
+        type: "input"
+        interrupt_edge: "rising"
+        debounce_ms: 250
+
     # Satu Titan pada CAN ID 42. Ubah can_id agar sama dengan konfigurasi
     # DIP switch / CAN ID pada Titan yang akan diuji.
     titan:

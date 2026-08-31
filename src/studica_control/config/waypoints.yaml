@@ -19,6 +19,14 @@ sequence: [A, B, C, D]
 
 sensor: titan0
 
+# Aktifkan setelah tombol dipasang pada VMX DIO dan start_button diaktifkan
+# pada titan_m1_test.yaml. Manual start service tetap dapat digunakan.
+start_button:
+  enabled: false
+  topic: "/start_button/state"
+  active_high: true
+  debounce_ms: 250
+
 motion:
   forward_duty: 0.12
   minimum_duty: 0.10

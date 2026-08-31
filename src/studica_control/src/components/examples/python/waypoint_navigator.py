@@ -26,8 +26,8 @@ from nav_msgs.msg import Odometry
 from rclpy.node import Node
 from rclpy.qos import qos_profile_sensor_data
 from sensor_msgs.msg import LaserScan
-from std_msgs.msg import Float64
-from std_srvs.srv import Trigger
+from std_msgs.msg import Bool, Float64
+from std_srvs.srv import Empty, Trigger
 
 
 def clamp(value: float, lower: float, upper: float) -> float:
@@ -99,6 +99,12 @@ class WaypointNavigator(Node):
         self.avoid_step_distance = float(
             obstacle.get('avoid_step_distance', 0.60))
         self.avoid_timeout = float(obstacle.get('timeout', 12.0))
+        button = config.get('start_button', {})
+        self.button_enabled = bool(button.get('enabled', False))
+        self.button_topic = str(
+            button.get('topic', '/start_button/state'))
+        self.button_active_high = bool(button.get('active_high', True))
+        self.button_debounce = float(button.get('debounce_ms', 250)) / 1000.0
 
         sensor = str(config.get('sensor', 'titan0'))
         self.motor_publishers = [
@@ -108,11 +114,17 @@ class WaypointNavigator(Node):
         self.create_subscription(Odometry, '/odom', self.odom_callback, 20)
         self.create_subscription(
             LaserScan, '/scan', self.scan_callback, qos_profile_sensor_data)
+        self.button_subscription = None
+        if self.button_enabled:
+            self.button_subscription = self.create_subscription(
+                Bool, self.button_topic, self.button_callback, 10)
         self.create_service(
             Trigger, '/waypoint_navigator/start', self.start_callback)
         self.create_service(
             Trigger, '/waypoint_navigator/stop', self.stop_callback)
         self.timer = self.create_timer(0.04, self.control_loop)
+        self.odom_reset_client = self.create_client(
+            Empty, '/wheel_odometry/reset')
 
         self.pose: Optional[Tuple[float, float, float]] = None
         self.last_odom_time = 0.0
@@ -128,6 +140,10 @@ class WaypointNavigator(Node):
         self.avoid_target_yaw = 0.0
         self.avoid_start: Optional[Tuple[float, float]] = None
         self.next_log_time = 0.0
+        self.last_button_active: Optional[bool] = None
+        self.last_button_press = 0.0
+        self.reset_future = None
+        self.start_pending = False
 
         points = ', '.join(
             f'{name}=({self.waypoints[name][0]:.2f}, '
@@ -137,6 +153,10 @@ class WaypointNavigator(Node):
         self.get_logger().info(
             'Siap tetapi belum bergerak. Reset /wheel_odometry/reset, lalu '
             'panggil /waypoint_navigator/start.')
+        if self.button_enabled:
+            self.get_logger().info(
+                f'Start button aktif: {self.button_topic}, '
+                f'active_high={self.button_active_high}')
 
     @staticmethod
     def load_config(config_path: str) -> dict:
@@ -180,25 +200,68 @@ class WaypointNavigator(Node):
             msg, math.radians(-100), math.radians(-30))
         self.last_scan_time = time.monotonic()
 
-    def start_callback(self, _request, response):
+    def button_callback(self, msg: Bool) -> None:
+        active = bool(msg.data) == self.button_active_high
+        if self.last_button_active is None:
+            self.last_button_active = active
+            return
+        rising_active = active and not self.last_button_active
+        self.last_button_active = active
+        now = time.monotonic()
+        if rising_active and now - self.last_button_press >= self.button_debounce:
+            self.last_button_press = now
+            accepted, message = self.request_start()
+            if accepted:
+                self.get_logger().info('START BUTTON: ' + message)
+            else:
+                self.get_logger().error('START BUTTON DITOLAK: ' + message)
+
+    def request_start(self) -> Tuple[bool, str]:
+        if self.active or self.start_pending:
+            return False, 'navigator sudah aktif atau sedang start'
         if self.pose is None:
-            response.success = False
-            response.message = 'Ditolak: /odom belum tersedia'
-            return response
+            return False, '/odom belum tersedia'
         if self.avoidance_enabled and time.monotonic() - self.last_scan_time > 1.0:
-            response.success = False
-            response.message = 'Ditolak: /scan belum tersedia atau stale'
-            return response
+            return False, '/scan belum tersedia atau stale'
+        if not self.odom_reset_client.service_is_ready():
+            return False, '/wheel_odometry/reset belum tersedia'
+        self.stop_motors()
+        self.reset_future = self.odom_reset_client.call_async(Empty.Request())
+        self.start_pending = True
+        self.state = 'RESETTING_ODOM'
+        return True, f'reset odometri, lalu mulai {self.sequence}'
+
+    def finish_pending_start(self) -> None:
+        if not self.start_pending or self.reset_future is None:
+            return
+        if not self.reset_future.done():
+            self.stop_motors()
+            return
+        try:
+            self.reset_future.result()
+        except Exception as error:
+            self.get_logger().error(f'Reset odometri gagal: {error}; STOP')
+            self.start_pending = False
+            self.reset_future = None
+            self.state = 'IDLE'
+            self.stop_motors()
+            return
         self.index = 0
         self.active = True
+        self.start_pending = False
+        self.reset_future = None
         self.set_state('TURN_TO_GOAL')
-        response.success = True
-        response.message = f'Mulai urutan {self.sequence}'
+        self.get_logger().info(f'RUN: urutan {self.sequence}')
+
+    def start_callback(self, _request, response):
+        response.success, response.message = self.request_start()
         self.get_logger().info(response.message)
         return response
 
     def stop_callback(self, _request, response):
         self.active = False
+        self.start_pending = False
+        self.reset_future = None
         self.state = 'IDLE'
         self.stop_motors()
         response.success = True
@@ -237,6 +300,9 @@ class WaypointNavigator(Node):
 
     def control_loop(self) -> None:
         now = time.monotonic()
+        if self.start_pending:
+            self.finish_pending_start()
+            return
         if not self.active:
             self.publish_drive(0.0, 0.0)
             return

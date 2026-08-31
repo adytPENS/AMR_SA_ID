@@ -113,6 +113,52 @@ Program belum bergerak sampai service start dipanggil:
 ros2 service call /waypoint_navigator/start std_srvs/srv/Trigger "{}"
 ```
 
+## Tombol start fisik
+
+Pada mode lomba, seluruh node sudah dijalankan lebih dahulu dan robot berada
+dalam keadaan `ARMED / STOP`. Tombol fisik tidak menyalakan ROS dari nol;
+tombol memicu urutan berikut:
+
+```text
+tekan START -> debounce -> validasi odom dan LiDAR -> reset odometri
+             -> jalankan sequence A/B/C/D
+```
+
+Konfigurasikan kanal DIO pada `titan_m1_test.yaml`:
+
+```yaml
+dio:
+  enabled: true
+  sensors: ["start_button"]
+  start_button:
+    pin: 0              # ganti sesuai kanal DIO yang dipakai
+    type: "input"
+    interrupt_edge: "rising"
+    debounce_ms: 250
+```
+
+Kemudian aktifkan subscriber tombol pada `waypoints.yaml`:
+
+```yaml
+start_button:
+  enabled: true
+  topic: "/start_button/state"
+  active_high: true     # gunakan false jika tombol aktif-low
+  debounce_ms: 250
+```
+
+Jangan menghubungkan tegangan 12 V ke DIO. Ikuti spesifikasi listrik VMX2
+untuk wiring input dan resistor pull-up/pull-down. Uji state sebelum motor
+diaktifkan:
+
+```bash
+ros2 topic echo /start_button/state
+```
+
+Nilai harus berubah satu kali ketika tombol ditekan dan kembali ketika
+dilepas. Tombol emergency stop fisik yang memutus aktuator tetap disarankan;
+tombol start bukan pengganti emergency stop.
+
 Stop darurat dari terminal mana pun:
 
 ```bash
