@@ -1,0 +1,35 @@
+# Uji awal aman: bergerak lurus 0.50 m dari pose start, lalu STOP.
+coordinate_mode: local
+start_pose: {x: 0.00, y: 0.00, yaw_deg: 0.0}
+
+waypoints:
+  A: {x: 0.50, y: 0.00}
+
+sequence: [A]
+sensor: titan0
+
+start_button:
+  enabled: false
+  topic: "/start_button/state"
+  active_high: true
+  debounce_ms: 250
+
+motion:
+  forward_duty: 0.10
+  minimum_duty: 0.10
+  turn_duty: 0.30
+  heading_kp: 0.18
+  distance_kp: 0.20
+  position_tolerance: 0.05
+  turn_tolerance_deg: 6.0
+  drive_heading_limit_deg: 25.0
+
+# Dinonaktifkan untuk validasi waypoint pertama. Aktifkan setelah gerak lurus,
+# heading correction, dan emergency stop sudah teruji.
+obstacle_avoidance:
+  enabled: false
+  stop_distance: 0.55
+  clear_distance: 0.75
+  avoid_angle_deg: 55.0
+  avoid_step_distance: 0.60
+  timeout: 12.0
