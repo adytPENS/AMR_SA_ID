@@ -9,6 +9,7 @@ Pemetaan fisik:
 
 Kontrol:
   W = maju, S = mundur, A = putar kiri, D = putar kanan
+  G = maju otomatis sejauh target encoder (default 1 meter)
   E = stop langsung, Q = stop dan keluar
 
 Terminal tidak menyediakan event key-release. Saat tombol ditahan, sistem
@@ -35,6 +36,22 @@ class TitanKeyboardTeleop(Node):
             self.create_publisher(Float64, f'/{sensor}/m_{motor}/cmd', 1)
             for motor in range(4)
         ]
+        self.encoder_values = [None] * 4
+        self.encoder_subscriptions = [
+            self.create_subscription(
+                Float64,
+                f'/{sensor}/m_{motor}/encoder',
+                lambda msg, index=motor: self.encoder_callback(index, msg),
+                10,
+            )
+            for motor in range(4)
+        ]
+
+    def encoder_callback(self, motor: int, msg: Float64) -> None:
+        self.encoder_values[motor] = float(msg.data)
+
+    def encoders_ready(self) -> bool:
+        return all(value is not None for value in self.encoder_values)
 
     def command(self, speeds) -> None:
         for publisher, speed in zip(self.motor_publishers, speeds):
@@ -56,11 +73,19 @@ def parse_args():
                         help='besar duty 0.05..0.30 (default 0.15)')
     parser.add_argument('--release-timeout', type=float, default=0.65,
                         help='stop setelah tidak ada key-repeat (default 0.65 s)')
+    parser.add_argument('--distance', type=float, default=1.0,
+                        help='target tombol G dalam meter (default 1.0)')
+    parser.add_argument('--distance-timeout', type=float, default=20.0,
+                        help='safety timeout gerak G dalam detik (default 20)')
     args, _ = parser.parse_known_args()
     if not 0.05 <= args.duty <= 0.30:
         parser.error('--duty harus antara 0.05 dan 0.30')
     if not 0.10 <= args.release_timeout <= 1.50:
         parser.error('--release-timeout harus antara 0.10 dan 1.50 detik')
+    if not 0.05 <= args.distance <= 5.0:
+        parser.error('--distance harus antara 0.05 dan 5.0 meter')
+    if not 2.0 <= args.distance_timeout <= 60.0:
+        parser.error('--distance-timeout harus antara 2 dan 60 detik')
     return args
 
 
@@ -83,14 +108,21 @@ def main() -> None:
     active_key = None
     last_key_time = 0.0
     last_sent = None
+    distance_active = False
+    distance_start = None
+    distance_start_time = 0.0
+    last_progress = 0.0
+    last_progress_time = 0.0
+    next_progress_log = 0.10
 
     try:
         tty.setcbreak(sys.stdin.fileno())
         node.get_logger().info(
-            'W maju | S mundur | A kiri | D kanan | E stop | Q keluar')
+            'W maju | S mundur | A kiri | D kanan | '
+            'G maju target | E stop | Q keluar')
         node.get_logger().info(
             f'duty={duty:.2f}; lepas tombol -> stop maksimal '
-            f'{args.release_timeout:.2f} detik')
+            f'{args.release_timeout:.2f} detik; target G={args.distance:.2f} m')
 
         # Tunggu discovery sebelum menerima perintah gerak.
         wait_until = time.monotonic() + 1.0
@@ -103,19 +135,76 @@ def main() -> None:
             readable, _, _ = select.select([sys.stdin], [], [], 0.02)
             if readable:
                 key = sys.stdin.read(1).lower()
-                if key in key_commands:
+                if key in key_commands and not distance_active:
                     active_key = key
                     last_key_time = now
+                elif key == 'g' and not distance_active:
+                    if not node.encoders_ready():
+                        node.get_logger().error(
+                            'G ditolak: data empat encoder belum tersedia')
+                    else:
+                        active_key = None
+                        distance_active = True
+                        distance_start = list(node.encoder_values)
+                        distance_start_time = now
+                        last_progress = 0.0
+                        last_progress_time = now
+                        next_progress_log = 0.10
+                        node.get_logger().info(
+                            f'G: maju otomatis {args.distance:.2f} m')
                 elif key == 'e':
                     active_key = None
+                    distance_active = False
                     last_key_time = 0.0
                     node.stop()
                     last_sent = None
-                    node.get_logger().info('STOP')
+                    node.get_logger().info('STOP / target dibatalkan')
                 elif key == 'q':
                     break
 
-            if active_key and now - last_key_time <= args.release_timeout:
+            if distance_active:
+                distances = [
+                    abs(current - start)
+                    for current, start in zip(node.encoder_values, distance_start)
+                ]
+                progress = sum(distances) / 4.0
+
+                if progress >= args.distance:
+                    distance_active = False
+                    node.stop()
+                    last_sent = None
+                    values = ', '.join(
+                        f'M{i}={value:.3f}m'
+                        for i, value in enumerate(distances)
+                    )
+                    node.get_logger().info(
+                        f'TARGET TERCAPAI: rata-rata={progress:.3f}m; '
+                        f'{values}; STOP')
+                elif now - distance_start_time >= args.distance_timeout:
+                    distance_active = False
+                    node.stop()
+                    last_sent = None
+                    node.get_logger().error(
+                        f'SAFETY TIMEOUT pada {progress:.3f}m; STOP')
+                elif now - last_progress_time >= 1.5:
+                    distance_active = False
+                    node.stop()
+                    last_sent = None
+                    node.get_logger().error(
+                        f'ENCODER STALL pada {progress:.3f}m; STOP')
+                else:
+                    if progress >= last_progress + 0.002:
+                        last_progress = progress
+                        last_progress_time = now
+                    if progress >= next_progress_log:
+                        node.get_logger().info(
+                            f'G progress: {progress:.3f}/{args.distance:.3f} m')
+                        next_progress_log += 0.10
+                    command = key_commands['w']
+
+            if distance_active:
+                pass
+            elif active_key and now - last_key_time <= args.release_timeout:
                 command = key_commands[active_key]
             else:
                 active_key = None
@@ -124,7 +213,10 @@ def main() -> None:
             # Publish berulang pada sekitar 50 Hz untuk watchdog Titan.
             node.command(command)
             if command != last_sent:
-                label = active_key.upper() if active_key else 'STOP (key released)'
+                if distance_active:
+                    label = f'G ({args.distance:.2f} m)'
+                else:
+                    label = active_key.upper() if active_key else 'STOP'
                 node.get_logger().info(label)
                 last_sent = command
             rclpy.spin_once(node, timeout_sec=0.0)

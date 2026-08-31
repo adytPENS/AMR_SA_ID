@@ -138,11 +138,24 @@ Kontrol:
 | S | mundur |
 | A | putar kiri |
 | D | putar kanan |
-| E | stop |
+| G | maju otomatis sesuai target encoder (default 1 meter) |
+| E | stop atau batalkan gerakan G |
 | Q | stop dan keluar |
 
 Program memakai key-repeat terminal. Setelah tombol dilepas, motor berhenti
 otomatis dalam waktu sekitar `0.65 detik`.
+
+Untuk uji otomatis satu meter, jalankan dengan duty rendah:
+
+```bash
+python3 /home/vmx/studica_ws/src/studica_control/src/components/examples/python/titan_keyboard_teleop.py \
+  --duty 0.10 --distance 1.0
+```
+
+Tekan `G` satu kali. Program mengambil posisi awal empat encoder dan berhenti
+ketika rata-rata perjalanan roda mencapai target. `E` selalu dapat dipakai
+untuk membatalkan gerakan. Safety timeout dan deteksi encoder stall juga akan
+menghentikan motor jika pembacaan bermasalah.
 
 ## 6. Menguji satu motor
 
@@ -284,10 +297,67 @@ SLAM membutuhkan rangkaian transformasi berikut:
 map -> odom -> base_link -> laser_frame
 ```
 
-Saat ini `/scan` dan `base_link -> laser_frame` sudah bekerja. Pembuatan
-`/odom` dan `odom -> base_link` menunggu encoder roda menghasilkan nilai yang
-valid. Jangan membuat peta final sebelum encoder berfungsi, karena peta dapat
-bergeser, berputar, atau bertumpuk.
+Saat ini `/scan`, `base_link -> laser_frame`, dan keempat encoder sudah
+berfungsi. Node `wheel_odometry.py` menyediakan `/odom` serta
+`odom -> base_link`. Validasi arah dan skala odometri dilakukan sebelum peta
+final digunakan untuk navigasi.
+
+### Menjalankan odometri dan SLAM tanpa build C++
+
+Encoder M0-M3 sudah tervalidasi. Arah encoder M0 dan M1 dibalik agar semua
+jarak bernilai positif ketika robot maju. Setelah `control_server` aktif,
+inisialisasi seluruh encoder dengan:
+
+```bash
+cd /home/vmx/studica_ws
+bash scripts/init_titan_encoders.sh
+```
+
+Jalankan hardware Titan dan LiDAR terlebih dahulu, kemudian pada terminal
+mapping:
+
+```bash
+cd /home/vmx/studica_ws
+bash scripts/start_mapping.sh
+```
+
+Skrip ini memeriksa `/scan` dan keempat topic encoder, lalu menjalankan:
+
+```text
+wheel_odometry.py -> /odom dan odom -> base_link
+slam_toolbox      -> /map dan map -> odom
+```
+
+Pada terminal lain, buka RViz:
+
+```bash
+source /opt/ros/humble/setup.bash
+source /home/vmx/studica_ws/install/setup.bash
+export RMW_IMPLEMENTATION=rmw_cyclonedds_cpp
+rviz2
+```
+
+Atur `Fixed Frame` menjadi `map`, kemudian tambahkan display `Map` dengan
+topic `/map`, `LaserScan` dengan topic `/scan` dan QoS `Best Effort`, serta
+`TF`.
+
+Gerakkan robot perlahan memakai keyboard dengan duty `0.10`. Hindari gerakan
+cepat dan putaran mendadak. Untuk hasil loop closure yang baik, kembalikan
+robot mendekati posisi awal sebelum menyimpan peta.
+
+Simpan peta di terminal baru:
+
+```bash
+cd /home/vmx/studica_ws
+bash scripts/save_map.sh arena_map
+```
+
+Hasilnya:
+
+```text
+/home/vmx/studica_ws/maps/arena_map.yaml
+/home/vmx/studica_ws/maps/arena_map.pgm
+```
 
 ## 12. Backup ke GitHub
 

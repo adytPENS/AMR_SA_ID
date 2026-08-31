@@ -29,12 +29,15 @@ control_server:
           encoder_mode: "quadrature"
           dist_per_tick: 0.000308604386
           invert_motor: false
-          invert_encoder: false
+          # Motor kanan memakai duty negatif untuk maju; balik feedback agar
+          # jarak maju tetap positif untuk odometri.
+          invert_encoder: true
           invert_rpm: false
 
         m_1:
           encoder_mode: "quadrature"
           dist_per_tick: 0.000308604386
+          invert_encoder: true
         m_2:
           encoder_mode: "quadrature"
           dist_per_tick: 0.000308604386

@@ -141,6 +141,11 @@ Titan::Titan(std::shared_ptr<VMXPi> vmx, const std::string &name, const uint8_t 
         std::bind(&Titan::resend_speeds, this));
 
     for (int i = 0; i < 4; i++) {
+        // Titan requires each quadrature channel to be initialized before
+        // applying distance scaling or reading feedback.
+        if (motor_configs_[i].encoder_mode == EncoderMode::Quadrature) {
+            titan_->SetupEncoder(i);
+        }
         titan_->ConfigureEncoder(i, motor_configs_[i].dist_per_tick);
         titan_->ResetEncoder(i);
         if (motor_configs_[i].invert_motor)   titan_->InvertMotorDirection(i);
