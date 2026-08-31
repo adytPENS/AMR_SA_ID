@@ -13,8 +13,10 @@ export RMW_IMPLEMENTATION=rmw_cyclonedds_cpp
 set -u
 
 cleanup() {
+  # Prevent SIGINT/SIGTERM received by child commands from re-entering cleanup.
+  trap - EXIT INT TERM
   echo "Menghentikan waypoint navigator dan wheel odometry..."
-  ros2 service call /waypoint_navigator/stop std_srvs/srv/Trigger "{}" \
+  timeout 2 ros2 service call /waypoint_navigator/stop std_srvs/srv/Trigger "{}" \
     >/dev/null 2>&1 || true
   kill "${NAV_PID:-}" "${ODOM_PID:-}" 2>/dev/null || true
   wait "${NAV_PID:-}" "${ODOM_PID:-}" 2>/dev/null || true

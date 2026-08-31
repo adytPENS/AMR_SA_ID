@@ -16,6 +16,7 @@ import rclpy
 from geometry_msgs.msg import TransformStamped
 from nav_msgs.msg import Odometry
 from rclpy.node import Node
+from rclpy.executors import ExternalShutdownException
 from sensor_msgs.msg import Imu
 from std_msgs.msg import Float64
 from std_srvs.srv import Empty
@@ -210,7 +211,7 @@ def main() -> None:
     node = WheelOdometry()
     try:
         rclpy.spin(node)
-    except KeyboardInterrupt:
+    except (KeyboardInterrupt, ExternalShutdownException):
         pass
     finally:
         node.destroy_node()

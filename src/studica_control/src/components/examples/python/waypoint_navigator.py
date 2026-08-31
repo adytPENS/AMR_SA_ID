@@ -23,6 +23,7 @@ from typing import Dict, List, Optional, Tuple
 import rclpy
 import yaml
 from nav_msgs.msg import Odometry
+from rclpy.executors import ExternalShutdownException
 from rclpy.node import Node
 from rclpy.qos import qos_profile_sensor_data
 from sensor_msgs.msg import LaserScan
@@ -427,7 +428,7 @@ def main() -> None:
     node = WaypointNavigator(args.config, args.sequence)
     try:
         rclpy.spin(node)
-    except KeyboardInterrupt:
+    except (KeyboardInterrupt, ExternalShutdownException):
         node.get_logger().warning('Ctrl+C; STOP')
     finally:
         node.stop_motors()
