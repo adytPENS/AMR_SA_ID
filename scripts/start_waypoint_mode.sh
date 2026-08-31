@@ -18,13 +18,42 @@ cleanup() {
   echo "Menghentikan waypoint navigator dan wheel odometry..."
   timeout 2 ros2 service call /waypoint_navigator/stop std_srvs/srv/Trigger "{}" \
     >/dev/null 2>&1 || true
+  # SetData/set_speed updates the duty stored by Titan's resend timer, so a
+  # stopped publisher cannot leave the last nonzero command running forever.
+  for motor in 0 1 2 3; do
+    timeout 2 ros2 service call /titan0/titan_cmd \
+      studica_control/srv/SetData \
+      "{params: 'set_speed', initparams: {n_encoder: $motor, speed: 0.0}}" \
+      >/dev/null 2>&1 || true
+  done
   kill "${NAV_PID:-}" "${ODOM_PID:-}" 2>/dev/null || true
   wait "${NAV_PID:-}" "${ODOM_PID:-}" 2>/dev/null || true
 }
 trap cleanup EXIT INT TERM
 
 TOPIC_LIST="$(timeout 15 ros2 topic list)"
-for topic in /imu /scan /titan0/m_0/encoder /titan0/m_1/encoder /titan0/m_2/encoder /titan0/m_3/encoder; do
+REQUIRE_SCAN="$(python3 - "$WAYPOINTS" <<'PY'
+import sys
+import yaml
+
+with open(sys.argv[1], encoding='utf-8') as stream:
+    config = yaml.safe_load(stream) or {}
+print('true' if config.get('obstacle_avoidance', {}).get('enabled', True) else 'false')
+PY
+)"
+
+REQUIRED_TOPICS=(
+  /imu
+  /titan0/m_0/encoder
+  /titan0/m_1/encoder
+  /titan0/m_2/encoder
+  /titan0/m_3/encoder
+)
+if [[ "$REQUIRE_SCAN" == "true" ]]; then
+  REQUIRED_TOPICS+=(/scan)
+fi
+
+for topic in "${REQUIRED_TOPICS[@]}"; do
   if ! grep -Fxq "$topic" <<<"$TOPIC_LIST"; then
     echo "ERROR: $topic belum tersedia." >&2
     exit 1
