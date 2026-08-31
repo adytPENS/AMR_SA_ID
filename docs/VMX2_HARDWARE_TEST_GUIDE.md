@@ -127,7 +127,7 @@ source /home/vmx/studica_ws/install/setup.bash
 export RMW_IMPLEMENTATION=rmw_cyclonedds_cpp
 
 python3 /home/vmx/studica_ws/src/studica_control/src/components/examples/python/titan_keyboard_teleop.py \
-  --duty 0.10
+  --duty 0.10 --turn-duty 0.18
 ```
 
 Kontrol:

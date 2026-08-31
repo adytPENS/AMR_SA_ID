@@ -71,6 +71,8 @@ def parse_args():
     parser.add_argument('--sensor', default='titan0', help='nama Titan di YAML')
     parser.add_argument('--duty', type=float, default=0.15,
                         help='besar duty 0.05..0.30 (default 0.15)')
+    parser.add_argument('--turn-duty', type=float, default=None,
+                        help='duty khusus A/D; default sama dengan --duty')
     parser.add_argument('--release-timeout', type=float, default=0.65,
                         help='stop setelah tidak ada key-repeat (default 0.65 s)')
     parser.add_argument('--distance', type=float, default=1.0,
@@ -80,6 +82,10 @@ def parse_args():
     args, _ = parser.parse_known_args()
     if not 0.05 <= args.duty <= 0.30:
         parser.error('--duty harus antara 0.05 dan 0.30')
+    if args.turn_duty is None:
+        args.turn_duty = args.duty
+    if not 0.05 <= args.turn_duty <= 0.30:
+        parser.error('--turn-duty harus antara 0.05 dan 0.30')
     if not 0.10 <= args.release_timeout <= 1.50:
         parser.error('--release-timeout harus antara 0.10 dan 1.50 detik')
     if not 0.05 <= args.distance <= 5.0:
@@ -96,13 +102,14 @@ def main() -> None:
     old_terminal = termios.tcgetattr(sys.stdin)
 
     duty = args.duty
+    turn_duty = args.turn_duty
     # Hasil uji robot: motor kanan maju = negatif dan motor kiri maju = positif.
     # A/D memutar kedua sisi dengan arah linear berlawanan.
     key_commands = {
         'w': (-duty, -duty,  duty,  duty),
         's': ( duty,  duty, -duty, -duty),
-        'a': (-duty, -duty, -duty, -duty),
-        'd': ( duty,  duty,  duty,  duty),
+        'a': (-turn_duty, -turn_duty, -turn_duty, -turn_duty),
+        'd': ( turn_duty,  turn_duty,  turn_duty,  turn_duty),
     }
 
     active_key = None
@@ -121,7 +128,8 @@ def main() -> None:
             'W maju | S mundur | A kiri | D kanan | '
             'G maju target | E stop | Q keluar')
         node.get_logger().info(
-            f'duty={duty:.2f}; lepas tombol -> stop maksimal '
+            f'duty maju={duty:.2f}; duty putar={turn_duty:.2f}; '
+            f'lepas tombol -> stop maksimal '
             f'{args.release_timeout:.2f} detik; target G={args.distance:.2f} m')
 
         # Tunggu discovery sebelum menerima perintah gerak.
