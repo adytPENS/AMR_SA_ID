@@ -1,24 +1,5 @@
 #!/usr/bin/env python3
-"""Teleop keyboard aman untuk drivetrain 4 motor Titan.
-
-Pemetaan fisik:
-  M0 = depan kanan,   positif = CCW
-  M1 = belakang kanan, positif = CCW
-  M2 = depan kiri
-  M3 = belakang kiri
-
-Kontrol:
-  W = maju, S = mundur, A = putar kiri, D = putar kanan
-  G = maju otomatis sejauh target encoder (default 1 meter)
-  E = stop langsung, Q = stop dan keluar
-
-Terminal tidak menyediakan event key-release. Saat tombol ditahan, sistem
-operasi mengirim key-repeat; bila repeat berhenti selama release_timeout,
-program otomatis mengirim nol ke seluruh motor.
-
-PID speed encoder M0-M3 aktif secara default. Gunakan --no-pid hanya untuk
-diagnosis open-loop.
-"""
+"""Keyboard AMR yang menerbitkan geometry_msgs/Twist ke /cmd_vel."""
 
 import argparse
 import select
@@ -28,178 +9,89 @@ import time
 import tty
 
 import rclpy
+from geometry_msgs.msg import Twist
 from rclpy.node import Node
 from std_msgs.msg import Float64
 
-from motor_speed_pid import MotorSpeedPID
 
-
-class TitanKeyboardTeleop(Node):
-    def __init__(self, sensor: str, args) -> None:
-        super().__init__('titan_keyboard_teleop')
-        self.motor_publishers = [
-            self.create_publisher(Float64, f'/{sensor}/m_{motor}/cmd', 1)
-            for motor in range(4)
-        ]
+class KeyboardCmdVel(Node):
+    def __init__(self, sensor: str) -> None:
+        super().__init__('keyboard_cmd_vel')
+        self.cmd_publisher = self.create_publisher(Twist, '/cmd_vel', 10)
         self.encoder_values = [None] * 4
-        self.pid_enabled = args.pid
-        self.speed_controllers = [
-            MotorSpeedPID(
-                polarity=(-1.0 if motor < 2 else 1.0),
-                speed_at_full_duty=args.speed_at_full_duty,
-                kp=args.pid_kp,
-                ki=args.pid_ki,
-                duty_limit=args.duty_limit,
-            )
-            for motor in range(4)
-        ]
         self.encoder_subscriptions = [
             self.create_subscription(
-                Float64,
-                f'/{sensor}/m_{motor}/encoder',
-                lambda msg, index=motor: self.encoder_callback(index, msg),
-                10,
-            )
+                Float64, f'/{sensor}/m_{motor}/encoder',
+                lambda msg, index=motor: self.encoder_callback(index, msg), 10)
             for motor in range(4)
         ]
 
     def encoder_callback(self, motor: int, msg: Float64) -> None:
-        now = time.monotonic()
-        position = float(msg.data)
-        self.encoder_values[motor] = position
-        self.speed_controllers[motor].update_encoder(position, now)
+        self.encoder_values[motor] = float(msg.data)
 
     def encoders_ready(self) -> bool:
         return all(value is not None for value in self.encoder_values)
 
-    def pid_ready(self) -> bool:
-        now = time.monotonic()
-        return all(controller.ready(now) for controller in self.speed_controllers)
-
-    def reset_pid(self) -> None:
-        for controller in self.speed_controllers:
-            controller.reset()
-
-    def command(self, speeds, apply_pid: bool = True) -> bool:
-        outputs = list(speeds)
-        if self.pid_enabled and apply_pid and any(abs(v) > 1e-6 for v in speeds):
-            if not self.pid_ready():
-                outputs = [0.0] * 4
-                self.reset_pid()
-                accepted = False
-            else:
-                accepted = True
-                now = time.monotonic()
-                for motor, electrical_target in enumerate(speeds):
-                    outputs[motor] = self.speed_controllers[motor].calculate(
-                        electrical_target, now)
-        else:
-            accepted = True
-            if not any(abs(v) > 1e-6 for v in speeds):
-                self.reset_pid()
-        for publisher, speed in zip(self.motor_publishers, outputs):
-            msg = Float64()
-            msg.data = float(speed)
-            publisher.publish(msg)
-        return accepted
+    def publish_cmd(self, vx: float, wz: float) -> None:
+        msg = Twist()
+        msg.linear.x = float(vx)
+        msg.angular.z = float(wz)
+        self.cmd_publisher.publish(msg)
 
     def stop(self) -> None:
-        # Ulangi agar STOP tetap diterima ketika DDS baru selesai discovery.
         for _ in range(5):
-            self.command((0.0, 0.0, 0.0, 0.0), apply_pid=False)
+            self.publish_cmd(0.0, 0.0)
             rclpy.spin_once(self, timeout_sec=0.02)
 
 
 def parse_args():
-    parser = argparse.ArgumentParser(description='Teleop WASD Titan 4 motor')
-    parser.add_argument('--sensor', default='titan0', help='nama Titan di YAML')
-    parser.add_argument('--duty', type=float, default=0.15,
-                        help='besar duty 0.05..0.70 (default 0.15)')
-    parser.add_argument('--turn-duty', type=float, default=None,
-                        help='duty khusus A/D; default sama dengan --duty')
-    parser.add_argument('--release-timeout', type=float, default=0.65,
-                        help='stop setelah tidak ada key-repeat (default 0.65 s)')
-    parser.add_argument('--distance', type=float, default=1.0,
-                        help='target tombol G dalam meter (default 1.0)')
-    parser.add_argument('--distance-timeout', type=float, default=20.0,
-                        help='safety timeout gerak G dalam detik (default 20)')
-    pid_group = parser.add_mutually_exclusive_group()
-    pid_group.add_argument('--pid', dest='pid', action='store_true',
-                           help='aktifkan PID speed (default)')
-    pid_group.add_argument('--no-pid', dest='pid', action='store_false',
-                           help='diagnosis open-loop tanpa PID')
-    parser.set_defaults(pid=True)
-    parser.add_argument('--speed-at-full-duty', type=float, default=0.75,
-                        help='estimasi kecepatan roda pada duty 1.0 (m/s)')
-    parser.add_argument('--pid-kp', type=float, default=0.25)
-    parser.add_argument('--pid-ki', type=float, default=0.10)
-    parser.add_argument('--duty-limit', type=float, default=0.70,
-                        help='batas duty keluaran PI (default 0.70)')
+    parser = argparse.ArgumentParser(description='Keyboard /cmd_vel AMR')
+    parser.add_argument('--sensor', default='titan0')
+    parser.add_argument('--linear-speed', type=float, default=0.35)
+    parser.add_argument('--angular-speed', type=float, default=1.5)
+    parser.add_argument('--release-timeout', type=float, default=0.65)
+    parser.add_argument('--distance', type=float, default=1.0)
+    parser.add_argument('--distance-timeout', type=float, default=20.0)
     args, _ = parser.parse_known_args()
-    if not 0.05 <= args.duty <= 0.70:
-        parser.error('--duty harus antara 0.05 dan 0.70')
-    if args.turn_duty is None:
-        args.turn_duty = args.duty
-    if not 0.05 <= args.turn_duty <= 0.70:
-        parser.error('--turn-duty harus antara 0.05 dan 0.70')
-    if not 0.10 <= args.speed_at_full_duty <= 2.0:
-        parser.error('--speed-at-full-duty harus antara 0.10 dan 2.0 m/s')
-    if not 0.05 <= args.duty_limit <= 1.0:
-        parser.error('--duty-limit harus antara 0.05 dan 1.0')
+    if not 0.02 <= args.linear_speed <= 0.75:
+        parser.error('--linear-speed harus 0.02..0.75 m/s')
+    if not 0.10 <= args.angular_speed <= 5.0:
+        parser.error('--angular-speed harus 0.10..5.0 rad/s')
     if not 0.10 <= args.release_timeout <= 1.50:
-        parser.error('--release-timeout harus antara 0.10 dan 1.50 detik')
+        parser.error('--release-timeout harus 0.10..1.50 detik')
     if not 0.05 <= args.distance <= 5.0:
-        parser.error('--distance harus antara 0.05 dan 5.0 meter')
-    if not 2.0 <= args.distance_timeout <= 60.0:
-        parser.error('--distance-timeout harus antara 2 dan 60 detik')
+        parser.error('--distance harus 0.05..5.0 meter')
     return args
 
 
 def main() -> None:
     args = parse_args()
     rclpy.init()
-    node = TitanKeyboardTeleop(args.sensor, args)
+    node = KeyboardCmdVel(args.sensor)
     old_terminal = termios.tcgetattr(sys.stdin)
-
-    duty = args.duty
-    turn_duty = args.turn_duty
-    # Hasil uji robot: motor kanan maju = negatif dan motor kiri maju = positif.
-    # A/D memutar kedua sisi dengan arah linear berlawanan.
     key_commands = {
-        'w': (-duty, -duty,  duty,  duty),
-        's': ( duty,  duty, -duty, -duty),
-        'a': (-turn_duty, -turn_duty, -turn_duty, -turn_duty),
-        'd': ( turn_duty,  turn_duty,  turn_duty,  turn_duty),
+        'w': (args.linear_speed, 0.0),
+        's': (-args.linear_speed, 0.0),
+        'a': (0.0, args.angular_speed),
+        'd': (0.0, -args.angular_speed),
     }
-
     active_key = None
     last_key_time = 0.0
-    last_sent = None
+    last_label = None
     distance_active = False
     distance_start = None
-    distance_start_time = 0.0
-    last_progress = 0.0
-    last_progress_time = 0.0
-    next_progress_log = 0.10
-    pid_feedback_warned = False
+    distance_started = 0.0
 
     try:
         tty.setcbreak(sys.stdin.fileno())
         node.get_logger().info(
-            'W maju | S mundur | A kiri | D kanan | '
-            'G maju target | E stop | Q keluar')
+            'W maju | S mundur | A kiri | D kanan | G target | E stop | Q keluar')
         node.get_logger().info(
-            f'duty maju={duty:.2f}; duty putar={turn_duty:.2f}; '
-            f'lepas tombol -> stop maksimal '
-            f'{args.release_timeout:.2f} detik; target G={args.distance:.2f} m')
-        node.get_logger().info(
-            'PID encoder per motor: '
-            + ('AKTIF' if args.pid else 'NONAKTIF'))
-
-        # Tunggu discovery sebelum menerima perintah gerak.
+            f'/cmd_vel linear={args.linear_speed:.2f}m/s, '
+            f'angular={args.angular_speed:.2f}rad/s')
         wait_until = time.monotonic() + 1.0
         while time.monotonic() < wait_until:
-            node.command((0.0, 0.0, 0.0, 0.0))
+            node.publish_cmd(0.0, 0.0)
             rclpy.spin_once(node, timeout_sec=0.02)
 
         while rclpy.ok():
@@ -212,100 +104,52 @@ def main() -> None:
                     last_key_time = now
                 elif key == 'g' and not distance_active:
                     if not node.encoders_ready():
-                        node.get_logger().error(
-                            'G ditolak: data empat encoder belum tersedia')
+                        node.get_logger().error('G ditolak: encoder belum lengkap')
                     else:
                         active_key = None
                         distance_active = True
                         distance_start = list(node.encoder_values)
-                        distance_start_time = now
-                        last_progress = 0.0
-                        last_progress_time = now
-                        next_progress_log = 0.10
-                        node.get_logger().info(
-                            f'G: maju otomatis {args.distance:.2f} m')
+                        distance_started = now
                 elif key == 'e':
                     active_key = None
                     distance_active = False
-                    last_key_time = 0.0
                     node.stop()
-                    last_sent = None
-                    node.get_logger().info('STOP / target dibatalkan')
+                    last_label = None
                 elif key == 'q':
                     break
 
             if distance_active:
-                distances = [
-                    abs(current - start)
-                    for current, start in zip(node.encoder_values, distance_start)
-                ]
+                distances = [abs(current - start) for current, start in
+                             zip(node.encoder_values, distance_start)]
                 progress = sum(distances) / 4.0
-
                 if progress >= args.distance:
                     distance_active = False
-                    node.stop()
-                    last_sent = None
-                    values = ', '.join(
-                        f'M{i}={value:.3f}m'
-                        for i, value in enumerate(distances)
-                    )
-                    node.get_logger().info(
-                        f'TARGET TERCAPAI: rata-rata={progress:.3f}m; '
-                        f'{values}; STOP')
-                elif now - distance_start_time >= args.distance_timeout:
+                    node.get_logger().info(f'G selesai {progress:.3f}m')
+                    command = (0.0, 0.0)
+                elif now - distance_started >= args.distance_timeout:
                     distance_active = False
-                    node.stop()
-                    last_sent = None
-                    node.get_logger().error(
-                        f'SAFETY TIMEOUT pada {progress:.3f}m; STOP')
-                elif now - last_progress_time >= 1.5:
-                    distance_active = False
-                    node.stop()
-                    last_sent = None
-                    node.get_logger().error(
-                        f'ENCODER STALL pada {progress:.3f}m; STOP')
+                    node.get_logger().error('G safety timeout')
+                    command = (0.0, 0.0)
                 else:
-                    if progress >= last_progress + 0.002:
-                        last_progress = progress
-                        last_progress_time = now
-                    if progress >= next_progress_log:
-                        node.get_logger().info(
-                            f'G progress: {progress:.3f}/{args.distance:.3f} m')
-                        next_progress_log += 0.10
-                    command = key_commands['w']
-
-            if distance_active:
-                pass
+                    command = (args.linear_speed, 0.0)
             elif active_key and now - last_key_time <= args.release_timeout:
                 command = key_commands[active_key]
             else:
                 active_key = None
-                command = (0.0, 0.0, 0.0, 0.0)
+                command = (0.0, 0.0)
 
-            # Publish berulang pada sekitar 50 Hz untuk watchdog Titan.
-            accepted = node.command(command)
-            if not accepted:
-                if not pid_feedback_warned:
-                    node.get_logger().error(
-                        'Gerak ditolak: feedback encoder PID belum lengkap/stale')
-                    pid_feedback_warned = True
-            else:
-                pid_feedback_warned = False
-            if command != last_sent:
-                if distance_active:
-                    label = f'G ({args.distance:.2f} m)'
-                else:
-                    label = active_key.upper() if active_key else 'STOP'
+            node.publish_cmd(*command)
+            label = 'G' if distance_active else (active_key.upper() if active_key else 'STOP')
+            if label != last_label:
                 node.get_logger().info(label)
-                last_sent = command
+                last_label = label
             rclpy.spin_once(node, timeout_sec=0.0)
-
     except KeyboardInterrupt:
-        node.get_logger().warning('Dihentikan dengan Ctrl+C')
+        pass
     finally:
         node.stop()
         termios.tcsetattr(sys.stdin, termios.TCSADRAIN, old_terminal)
-        node.get_logger().info('STOP — semua motor nol')
+        node.get_logger().info('STOP — /cmd_vel nol')
         node.destroy_node()
         if rclpy.ok():
             rclpy.shutdown()
