@@ -18,13 +18,15 @@ cleanup() {
 }
 trap cleanup EXIT INT TERM
 
-if ! ros2 topic list | grep -qx '/scan'; then
+TOPIC_LIST="$(timeout 15 ros2 topic list)"
+
+if ! grep -Fxq '/scan' <<<"$TOPIC_LIST"; then
   echo "ERROR: /scan belum tersedia. Jalankan driver YDLIDAR dahulu." >&2
   exit 1
 fi
 
 for motor in 0 1 2 3; do
-  if ! ros2 topic list | grep -qx "/titan0/m_${motor}/encoder"; then
+  if ! grep -Fxq "/titan0/m_${motor}/encoder" <<<"$TOPIC_LIST"; then
     echo "ERROR: encoder M${motor} belum tersedia. Jalankan control_server dahulu." >&2
     exit 1
   fi
