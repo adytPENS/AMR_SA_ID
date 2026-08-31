@@ -92,6 +92,20 @@ class WaypointNavigator(Node):
         self.drive_heading_limit = math.radians(
             float(motion.get('drive_heading_limit_deg', 25.0)))
 
+        speed_pid = config.get('speed_pid', {})
+        self.speed_pid_enabled = bool(speed_pid.get('enabled', False))
+        self.rpm_at_full_duty = float(
+            speed_pid.get('rpm_at_full_duty', 100.0))
+        self.speed_kp = float(speed_pid.get('kp', 0.0020))
+        self.speed_ki = float(speed_pid.get('ki', 0.0005))
+        self.speed_kd = float(speed_pid.get('kd', 0.0))
+        self.speed_integral_limit = float(
+            speed_pid.get('integral_limit', 20.0))
+        self.speed_feedback_timeout = float(
+            speed_pid.get('feedback_timeout', 0.30))
+        self.motor_duty_limit = float(
+            speed_pid.get('duty_limit', 0.30))
+
         self.avoidance_enabled = bool(obstacle.get('enabled', True))
         self.stop_distance = float(obstacle.get('stop_distance', 0.55))
         self.clear_distance = float(obstacle.get('clear_distance', 0.75))
@@ -110,6 +124,19 @@ class WaypointNavigator(Node):
         sensor = str(config.get('sensor', 'titan0'))
         self.motor_publishers = [
             self.create_publisher(Float64, f'/{sensor}/m_{i}/cmd', 1)
+            for i in range(4)
+        ]
+        self.motor_rpm: List[Optional[float]] = [None] * 4
+        self.motor_rpm_time: List[float] = [0.0] * 4
+        self.speed_integral: List[float] = [0.0] * 4
+        self.speed_previous_error: List[float] = [0.0] * 4
+        self.speed_previous_time: List[float] = [0.0] * 4
+        self.last_motor_commands: List[float] = [0.0] * 4
+        self.last_rpm_targets: List[float] = [0.0] * 4
+        self.rpm_subscriptions = [
+            self.create_subscription(
+                Float64, f'/{sensor}/m_{i}/rpm',
+                lambda msg, motor=i: self.rpm_callback(motor, msg), 10)
             for i in range(4)
         ]
         self.create_subscription(Odometry, '/odom', self.odom_callback, 20)
@@ -158,6 +185,11 @@ class WaypointNavigator(Node):
             self.get_logger().info(
                 f'Start button aktif: {self.button_topic}, '
                 f'active_high={self.button_active_high}')
+        if self.speed_pid_enabled:
+            self.get_logger().info(
+                'PID kecepatan per motor aktif: '
+                f'Kp={self.speed_kp}, Ki={self.speed_ki}, Kd={self.speed_kd}, '
+                f'RPM@duty1={self.rpm_at_full_duty}')
 
     @staticmethod
     def load_config(config_path: str) -> dict:
@@ -181,6 +213,10 @@ class WaypointNavigator(Node):
             yaw,
         )
         self.last_odom_time = time.monotonic()
+
+    def rpm_callback(self, motor: int, msg: Float64) -> None:
+        self.motor_rpm[motor] = float(msg.data)
+        self.motor_rpm_time[motor] = time.monotonic()
 
     @staticmethod
     def sector_min(msg: LaserScan, start: float, end: float) -> float:
@@ -226,6 +262,16 @@ class WaypointNavigator(Node):
             return False, '/scan belum tersedia atau stale'
         if not self.odom_reset_client.service_is_ready():
             return False, '/wheel_odometry/reset belum tersedia'
+        now = time.monotonic()
+        if self.speed_pid_enabled:
+            stale = [
+                index for index in range(4)
+                if (self.motor_rpm[index] is None or
+                    now - self.motor_rpm_time[index] >
+                    self.speed_feedback_timeout)
+            ]
+            if stale:
+                return False, f'feedback RPM stale/belum tersedia: {stale}'
         self.stop_motors()
         self.reset_future = self.odom_reset_client.call_async(Empty.Request())
         self.start_pending = True
@@ -274,19 +320,82 @@ class WaypointNavigator(Node):
         self.state = state
         self.state_started = time.monotonic()
 
-    def publish_drive(self, forward: float, turn_left: float) -> None:
-        # M0/M1 kanan memakai duty negatif untuk maju. M2/M3 kiri positif.
-        right = clamp(-(forward + turn_left), -0.30, 0.30)
-        left = clamp(forward - turn_left, -0.30, 0.30)
-        commands = (right, right, left, left)
+    def reset_speed_pid(self) -> None:
+        self.speed_integral = [0.0] * 4
+        self.speed_previous_error = [0.0] * 4
+        self.speed_previous_time = [0.0] * 4
+
+    def publish_motor_commands(self, commands: Tuple[float, ...]) -> None:
+        self.last_motor_commands = list(commands)
         for publisher, value in zip(self.motor_publishers, commands):
             msg = Float64()
             msg.data = float(value)
             publisher.publish(msg)
 
+    def speed_pid_command(self, motor: int, feedforward: float,
+                          now: float) -> float:
+        if abs(feedforward) < 1e-6:
+            self.speed_integral[motor] = 0.0
+            self.speed_previous_error[motor] = 0.0
+            self.speed_previous_time[motor] = now
+            return 0.0
+        measured = self.motor_rpm[motor]
+        if (measured is None or
+                now - self.motor_rpm_time[motor] >
+                self.speed_feedback_timeout):
+            return 0.0
+        target = feedforward * self.rpm_at_full_duty
+        self.last_rpm_targets[motor] = target
+        error = target - measured
+        previous_time = self.speed_previous_time[motor]
+        dt = now - previous_time if previous_time > 0.0 else 0.0
+        derivative = 0.0
+        if 0.0 < dt < 0.25:
+            candidate_integral = clamp(
+                self.speed_integral[motor] + error * dt,
+                -self.speed_integral_limit,
+                self.speed_integral_limit)
+            derivative = (
+                error - self.speed_previous_error[motor]) / dt
+        else:
+            candidate_integral = self.speed_integral[motor]
+        correction = (
+            self.speed_kp * error +
+            self.speed_ki * candidate_integral +
+            self.speed_kd * derivative)
+        output = clamp(
+            feedforward + correction,
+            -self.motor_duty_limit,
+            self.motor_duty_limit)
+        # Anti-windup: integrate only when the output is not saturated.
+        if abs(output) < self.motor_duty_limit - 1e-6:
+            self.speed_integral[motor] = candidate_integral
+        self.speed_previous_error[motor] = error
+        self.speed_previous_time[motor] = now
+        return output
+
+    def publish_drive(self, forward: float, turn_left: float) -> None:
+        # M0/M1 kanan memakai duty negatif untuk maju. M2/M3 kiri positif.
+        right = clamp(
+            -(forward + turn_left), -self.motor_duty_limit,
+            self.motor_duty_limit)
+        left = clamp(
+            forward - turn_left, -self.motor_duty_limit,
+            self.motor_duty_limit)
+        feedforward = (right, right, left, left)
+        if self.speed_pid_enabled:
+            now = time.monotonic()
+            commands = tuple(
+                self.speed_pid_command(i, value, now)
+                for i, value in enumerate(feedforward))
+        else:
+            commands = feedforward
+        self.publish_motor_commands(commands)
+
     def stop_motors(self) -> None:
+        self.reset_speed_pid()
         for _ in range(3):
-            self.publish_drive(0.0, 0.0)
+            self.publish_motor_commands((0.0, 0.0, 0.0, 0.0))
 
     def begin_avoidance(self) -> None:
         self.avoid_direction = (
@@ -307,6 +416,19 @@ class WaypointNavigator(Node):
         if not self.active:
             self.publish_drive(0.0, 0.0)
             return
+        if self.speed_pid_enabled:
+            stale = [
+                index for index in range(4)
+                if (self.motor_rpm[index] is None or
+                    now - self.motor_rpm_time[index] >
+                    self.speed_feedback_timeout)
+            ]
+            if stale:
+                self.get_logger().error(
+                    f'Feedback RPM stale pada motor {stale}; STOP')
+                self.active = False
+                self.stop_motors()
+                return
         if self.pose is None or now - self.last_odom_time > 0.6:
             self.get_logger().error('Odometri stale; STOP')
             self.active = False
@@ -338,6 +460,14 @@ class WaypointNavigator(Node):
                 f'{self.state} -> {name}: pose=({x:.2f},{y:.2f},'
                 f'{math.degrees(yaw):.1f}deg), jarak={distance:.2f}m, '
                 f'front={self.front_clearance:.2f}m')
+            if self.speed_pid_enabled:
+                rpm_text = ', '.join(
+                    'NA' if value is None else f'{value:.1f}'
+                    for value in self.motor_rpm)
+                duty_text = ', '.join(
+                    f'{value:.2f}' for value in self.last_motor_commands)
+                self.get_logger().info(
+                    f'PID RPM M0..M3=[{rpm_text}], duty=[{duty_text}]')
             self.next_log_time = now + 1.0
 
         if distance <= self.position_tolerance:

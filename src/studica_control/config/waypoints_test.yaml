@@ -15,14 +15,27 @@ start_button:
   debounce_ms: 250
 
 motion:
-  forward_duty: 0.10
+  forward_duty: 0.50
   minimum_duty: 0.10
   turn_duty: 0.30
   heading_kp: 0.18
-  distance_kp: 0.20
+  distance_kp: 1.20
   position_tolerance: 0.05
   turn_tolerance_deg: 6.0
   drive_heading_limit_deg: 25.0
+
+# Closed-loop RPM independen untuk M0, M1, M2, dan M3. Target RPM dihitung
+# dari duty yang diminta. Nilai rpm_at_full_duty dan gain perlu dituning dari
+# hasil pengujian robot di lantai; nilai awal dibuat konservatif.
+speed_pid:
+  enabled: true
+  rpm_at_full_duty: 100.0
+  kp: 0.0020
+  ki: 0.0005
+  kd: 0.0
+  integral_limit: 20.0
+  feedback_timeout: 0.30
+  duty_limit: 0.70
 
 # Dinonaktifkan untuk validasi waypoint pertama. Aktifkan setelah gerak lurus,
 # heading correction, dan emergency stop sudah teruji.
