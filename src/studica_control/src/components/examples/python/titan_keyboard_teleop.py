@@ -122,7 +122,7 @@ def parse_args():
                         help='safety timeout gerak G dalam detik (default 20)')
     parser.add_argument('--pid', action='store_true',
                         help='aktifkan PI speed independen M0-M3 dari encoder')
-    parser.add_argument('--speed-at-full-duty', type=float, default=0.63,
+    parser.add_argument('--speed-at-full-duty', type=float, default=0.75,
                         help='estimasi kecepatan roda pada duty 1.0 (m/s)')
     parser.add_argument('--pid-kp', type=float, default=0.25)
     parser.add_argument('--pid-ki', type=float, default=0.10)

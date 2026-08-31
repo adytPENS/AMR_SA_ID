@@ -18,7 +18,7 @@ class MotorSpeedPID:
     """
 
     polarity: float
-    speed_at_full_duty: float = 0.63
+    speed_at_full_duty: float = 0.75
     kp: float = 0.25
     ki: float = 0.10
     kd: float = 0.0

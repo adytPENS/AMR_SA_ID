@@ -92,7 +92,7 @@ def parse_args():
                         help='durasi bergerak dalam detik (default: 3)')
     parser.add_argument('--pid', action='store_true',
                         help='aktifkan PID speed berbasis encoder')
-    parser.add_argument('--speed-at-full-duty', type=float, default=0.63)
+    parser.add_argument('--speed-at-full-duty', type=float, default=0.75)
     parser.add_argument('--pid-kp', type=float, default=0.25)
     parser.add_argument('--pid-ki', type=float, default=0.10)
     parser.add_argument('--duty-limit', type=float, default=0.25)
@@ -110,6 +110,8 @@ def main() -> None:
     args = parse_args()
     rclpy.init()
     node = TitanM1Test(args.sensor, args.motor, args)
+    running_rpm = None
+    running_speed = None
 
     try:
         node.get_logger().info('Menunggu koneksi ke Titan component...')
@@ -137,6 +139,8 @@ def main() -> None:
                 if args.pid else args.duty)
             node.publish_speed(command)
             rclpy.spin_once(node, timeout_sec=0.05)
+            running_rpm = node.rpm
+            running_speed = node.pid.speed
             if time.monotonic() >= next_log:
                 enc = 'belum ada data' if node.encoder is None else f'{node.encoder:.0f} tick'
                 rpm = 'belum ada data' if node.rpm is None else f'{node.rpm:.1f} rpm'
@@ -157,7 +161,10 @@ def main() -> None:
         node.titan_command('set_speed', args.motor, 0.0)
         node.titan_command('disable', args.motor)
         node.get_logger().info(
-            f'STOP — hasil akhir: encoder={node.encoder}, rpm={node.rpm}')
+            f'STOP — encoder={node.encoder}, '
+            f'rpm_sebelum_stop={running_rpm}, '
+            f'speed_sebelum_stop={running_speed}, '
+            f'rpm_setelah_stop={node.rpm}')
         node.destroy_node()
         if rclpy.ok():
             rclpy.shutdown()
