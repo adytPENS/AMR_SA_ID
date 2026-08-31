@@ -30,13 +30,24 @@ from std_msgs.msg import Float64
 
 
 class TitanKeyboardTeleop(Node):
-    def __init__(self, sensor: str) -> None:
+    def __init__(self, sensor: str, args) -> None:
         super().__init__('titan_keyboard_teleop')
         self.motor_publishers = [
             self.create_publisher(Float64, f'/{sensor}/m_{motor}/cmd', 1)
             for motor in range(4)
         ]
         self.encoder_values = [None] * 4
+        self.encoder_times = [0.0] * 4
+        self.wheel_speeds = [None] * 4
+        self.pid_enabled = args.pid
+        self.speed_at_full_duty = args.speed_at_full_duty
+        self.pid_kp = args.pid_kp
+        self.pid_ki = args.pid_ki
+        self.pid_integrals = [0.0] * 4
+        self.pid_last_times = [0.0] * 4
+        self.pid_integral_limit = 0.50
+        self.feedback_timeout = 0.30
+        self.duty_limit = args.duty_limit
         self.encoder_subscriptions = [
             self.create_subscription(
                 Float64,
@@ -48,21 +59,83 @@ class TitanKeyboardTeleop(Node):
         ]
 
     def encoder_callback(self, motor: int, msg: Float64) -> None:
-        self.encoder_values[motor] = float(msg.data)
+        now = time.monotonic()
+        position = float(msg.data)
+        previous = self.encoder_values[motor]
+        previous_time = self.encoder_times[motor]
+        if previous is not None and previous_time > 0.0:
+            dt = now - previous_time
+            if 0.01 <= dt <= 0.25:
+                raw = (position - previous) / dt
+                old = self.wheel_speeds[motor]
+                self.wheel_speeds[motor] = (
+                    raw if old is None else 0.35 * raw + 0.65 * old)
+        self.encoder_values[motor] = position
+        self.encoder_times[motor] = now
 
     def encoders_ready(self) -> bool:
         return all(value is not None for value in self.encoder_values)
 
-    def command(self, speeds) -> None:
-        for publisher, speed in zip(self.motor_publishers, speeds):
+    def pid_ready(self) -> bool:
+        now = time.monotonic()
+        return all(
+            speed is not None and now - stamp <= self.feedback_timeout
+            for speed, stamp in zip(self.wheel_speeds, self.encoder_times)
+        )
+
+    def reset_pid(self) -> None:
+        self.pid_integrals = [0.0] * 4
+        self.pid_last_times = [0.0] * 4
+
+    def command(self, speeds, apply_pid: bool = True) -> bool:
+        outputs = list(speeds)
+        if self.pid_enabled and apply_pid and any(abs(v) > 1e-6 for v in speeds):
+            if not self.pid_ready():
+                outputs = [0.0] * 4
+                self.reset_pid()
+                accepted = False
+            else:
+                accepted = True
+                now = time.monotonic()
+                polarities = (-1.0, -1.0, 1.0, 1.0)
+                for motor, electrical_target in enumerate(speeds):
+                    polarity = polarities[motor]
+                    physical_ff = polarity * electrical_target
+                    target_speed = physical_ff * self.speed_at_full_duty
+                    error = target_speed - self.wheel_speeds[motor]
+                    last = self.pid_last_times[motor]
+                    dt = now - last if last > 0.0 else 0.0
+                    integral = self.pid_integrals[motor]
+                    if 0.0 < dt < 0.25:
+                        integral = max(
+                            -self.pid_integral_limit,
+                            min(self.pid_integral_limit, integral + error * dt))
+                    physical_output = physical_ff + self.pid_kp * error + self.pid_ki * integral
+                    # PI tidak boleh membalik arah yang ditentukan W/A/S/D.
+                    if physical_ff > 0.0:
+                        physical_output = max(0.0, min(self.duty_limit, physical_output))
+                    elif physical_ff < 0.0:
+                        physical_output = max(-self.duty_limit, min(0.0, physical_output))
+                    else:
+                        physical_output = 0.0
+                    outputs[motor] = polarity * physical_output
+                    if abs(physical_output) < self.duty_limit - 1e-6:
+                        self.pid_integrals[motor] = integral
+                    self.pid_last_times[motor] = now
+        else:
+            accepted = True
+            if not any(abs(v) > 1e-6 for v in speeds):
+                self.reset_pid()
+        for publisher, speed in zip(self.motor_publishers, outputs):
             msg = Float64()
             msg.data = float(speed)
             publisher.publish(msg)
+        return accepted
 
     def stop(self) -> None:
         # Ulangi agar STOP tetap diterima ketika DDS baru selesai discovery.
         for _ in range(5):
-            self.command((0.0, 0.0, 0.0, 0.0))
+            self.command((0.0, 0.0, 0.0, 0.0), apply_pid=False)
             rclpy.spin_once(self, timeout_sec=0.02)
 
 
@@ -70,7 +143,7 @@ def parse_args():
     parser = argparse.ArgumentParser(description='Teleop WASD Titan 4 motor')
     parser.add_argument('--sensor', default='titan0', help='nama Titan di YAML')
     parser.add_argument('--duty', type=float, default=0.15,
-                        help='besar duty 0.05..0.30 (default 0.15)')
+                        help='besar duty 0.05..0.70 (default 0.15)')
     parser.add_argument('--turn-duty', type=float, default=None,
                         help='duty khusus A/D; default sama dengan --duty')
     parser.add_argument('--release-timeout', type=float, default=0.65,
@@ -79,13 +152,25 @@ def parse_args():
                         help='target tombol G dalam meter (default 1.0)')
     parser.add_argument('--distance-timeout', type=float, default=20.0,
                         help='safety timeout gerak G dalam detik (default 20)')
+    parser.add_argument('--pid', action='store_true',
+                        help='aktifkan PI speed independen M0-M3 dari encoder')
+    parser.add_argument('--speed-at-full-duty', type=float, default=0.63,
+                        help='estimasi kecepatan roda pada duty 1.0 (m/s)')
+    parser.add_argument('--pid-kp', type=float, default=0.25)
+    parser.add_argument('--pid-ki', type=float, default=0.10)
+    parser.add_argument('--duty-limit', type=float, default=0.70,
+                        help='batas duty keluaran PI (default 0.70)')
     args, _ = parser.parse_known_args()
-    if not 0.05 <= args.duty <= 0.30:
-        parser.error('--duty harus antara 0.05 dan 0.30')
+    if not 0.05 <= args.duty <= 0.70:
+        parser.error('--duty harus antara 0.05 dan 0.70')
     if args.turn_duty is None:
         args.turn_duty = args.duty
-    if not 0.05 <= args.turn_duty <= 0.30:
-        parser.error('--turn-duty harus antara 0.05 dan 0.30')
+    if not 0.05 <= args.turn_duty <= 0.70:
+        parser.error('--turn-duty harus antara 0.05 dan 0.70')
+    if not 0.10 <= args.speed_at_full_duty <= 2.0:
+        parser.error('--speed-at-full-duty harus antara 0.10 dan 2.0 m/s')
+    if not 0.05 <= args.duty_limit <= 1.0:
+        parser.error('--duty-limit harus antara 0.05 dan 1.0')
     if not 0.10 <= args.release_timeout <= 1.50:
         parser.error('--release-timeout harus antara 0.10 dan 1.50 detik')
     if not 0.05 <= args.distance <= 5.0:
@@ -98,7 +183,7 @@ def parse_args():
 def main() -> None:
     args = parse_args()
     rclpy.init()
-    node = TitanKeyboardTeleop(args.sensor)
+    node = TitanKeyboardTeleop(args.sensor, args)
     old_terminal = termios.tcgetattr(sys.stdin)
 
     duty = args.duty
@@ -131,6 +216,9 @@ def main() -> None:
             f'duty maju={duty:.2f}; duty putar={turn_duty:.2f}; '
             f'lepas tombol -> stop maksimal '
             f'{args.release_timeout:.2f} detik; target G={args.distance:.2f} m')
+        node.get_logger().info(
+            'PID encoder per motor: '
+            + ('AKTIF' if args.pid else 'NONAKTIF'))
 
         # Tunggu discovery sebelum menerima perintah gerak.
         wait_until = time.monotonic() + 1.0

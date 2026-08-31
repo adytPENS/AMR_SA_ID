@@ -24,18 +24,6 @@ motion:
   turn_tolerance_deg: 6.0
   drive_heading_limit_deg: 25.0
 
-# Closed-loop speed independen untuk M0, M1, M2, dan M3. Feedback dihitung
-# dari delta encoder yang tanda arahnya sudah dinormalisasi.
-speed_pid:
-  enabled: true
-  speed_at_full_duty: 0.63
-  kp: 0.25
-  ki: 0.10
-  kd: 0.0
-  integral_limit: 0.50
-  feedback_timeout: 0.30
-  duty_limit: 0.70
-
 # Dinonaktifkan untuk validasi waypoint pertama. Aktifkan setelah gerak lurus,
 # heading correction, dan emergency stop sudah teruji.
 obstacle_avoidance:

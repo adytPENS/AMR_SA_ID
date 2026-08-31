@@ -92,20 +92,6 @@ class WaypointNavigator(Node):
         self.drive_heading_limit = math.radians(
             float(motion.get('drive_heading_limit_deg', 25.0)))
 
-        speed_pid = config.get('speed_pid', {})
-        self.speed_pid_enabled = bool(speed_pid.get('enabled', False))
-        self.speed_at_full_duty = float(
-            speed_pid.get('speed_at_full_duty', 0.63))
-        self.speed_kp = float(speed_pid.get('kp', 0.25))
-        self.speed_ki = float(speed_pid.get('ki', 0.10))
-        self.speed_kd = float(speed_pid.get('kd', 0.0))
-        self.speed_integral_limit = float(
-            speed_pid.get('integral_limit', 0.50))
-        self.speed_feedback_timeout = float(
-            speed_pid.get('feedback_timeout', 0.30))
-        self.motor_duty_limit = float(
-            speed_pid.get('duty_limit', 0.30))
-
         self.avoidance_enabled = bool(obstacle.get('enabled', True))
         self.stop_distance = float(obstacle.get('stop_distance', 0.55))
         self.clear_distance = float(obstacle.get('clear_distance', 0.75))
@@ -124,20 +110,6 @@ class WaypointNavigator(Node):
         sensor = str(config.get('sensor', 'titan0'))
         self.motor_publishers = [
             self.create_publisher(Float64, f'/{sensor}/m_{i}/cmd', 1)
-            for i in range(4)
-        ]
-        self.motor_encoder: List[Optional[float]] = [None] * 4
-        self.motor_encoder_time: List[float] = [0.0] * 4
-        self.motor_speed: List[Optional[float]] = [None] * 4
-        self.speed_integral: List[float] = [0.0] * 4
-        self.speed_previous_error: List[float] = [0.0] * 4
-        self.speed_previous_time: List[float] = [0.0] * 4
-        self.last_motor_commands: List[float] = [0.0] * 4
-        self.last_speed_targets: List[float] = [0.0] * 4
-        self.encoder_subscriptions = [
-            self.create_subscription(
-                Float64, f'/{sensor}/m_{i}/encoder',
-                lambda msg, motor=i: self.encoder_callback(motor, msg), 10)
             for i in range(4)
         ]
         self.create_subscription(Odometry, '/odom', self.odom_callback, 20)
@@ -186,11 +158,6 @@ class WaypointNavigator(Node):
             self.get_logger().info(
                 f'Start button aktif: {self.button_topic}, '
                 f'active_high={self.button_active_high}')
-        if self.speed_pid_enabled:
-            self.get_logger().info(
-                'PID kecepatan per motor aktif: '
-                f'Kp={self.speed_kp}, Ki={self.speed_ki}, Kd={self.speed_kd}, '
-                f'speed@duty1={self.speed_at_full_duty} m/s')
 
     @staticmethod
     def load_config(config_path: str) -> dict:
@@ -215,21 +182,6 @@ class WaypointNavigator(Node):
         )
         self.last_odom_time = time.monotonic()
 
-    def encoder_callback(self, motor: int, msg: Float64) -> None:
-        now = time.monotonic()
-        position = float(msg.data)
-        previous = self.motor_encoder[motor]
-        previous_time = self.motor_encoder_time[motor]
-        if previous is not None and previous_time > 0.0:
-            dt = now - previous_time
-            if 0.01 <= dt <= 0.25:
-                raw_speed = (position - previous) / dt
-                old_speed = self.motor_speed[motor]
-                self.motor_speed[motor] = (
-                    raw_speed if old_speed is None else
-                    0.35 * raw_speed + 0.65 * old_speed)
-        self.motor_encoder[motor] = position
-        self.motor_encoder_time[motor] = now
 
     @staticmethod
     def sector_min(msg: LaserScan, start: float, end: float) -> float:
@@ -275,16 +227,6 @@ class WaypointNavigator(Node):
             return False, '/scan belum tersedia atau stale'
         if not self.odom_reset_client.service_is_ready():
             return False, '/wheel_odometry/reset belum tersedia'
-        now = time.monotonic()
-        if self.speed_pid_enabled:
-            stale = [
-                index for index in range(4)
-                if (self.motor_speed[index] is None or
-                    now - self.motor_encoder_time[index] >
-                    self.speed_feedback_timeout)
-            ]
-            if stale:
-                return False, f'feedback encoder stale/belum tersedia: {stale}'
         self.stop_motors()
         self.reset_future = self.odom_reset_client.call_async(Empty.Request())
         self.start_pending = True
@@ -333,91 +275,19 @@ class WaypointNavigator(Node):
         self.state = state
         self.state_started = time.monotonic()
 
-    def reset_speed_pid(self) -> None:
-        self.speed_integral = [0.0] * 4
-        self.speed_previous_error = [0.0] * 4
-        self.speed_previous_time = [0.0] * 4
-
-    def publish_motor_commands(self, commands: Tuple[float, ...]) -> None:
-        self.last_motor_commands = list(commands)
+    def publish_drive(self, forward: float, turn_left: float) -> None:
+        # M0/M1 kanan memakai duty negatif untuk maju. M2/M3 kiri positif.
+        right = clamp(-(forward + turn_left), -0.70, 0.70)
+        left = clamp(forward - turn_left, -0.70, 0.70)
+        commands = (right, right, left, left)
         for publisher, value in zip(self.motor_publishers, commands):
             msg = Float64()
             msg.data = float(value)
             publisher.publish(msg)
 
-    def speed_pid_command(self, motor: int, feedforward: float,
-                          now: float) -> float:
-        if abs(feedforward) < 1e-6:
-            self.speed_integral[motor] = 0.0
-            self.speed_previous_error[motor] = 0.0
-            self.speed_previous_time[motor] = now
-            return 0.0
-        # Encoder sudah dinormalisasi: gerak fisik maju selalu positif.
-        # Duty listrik motor kanan berlawanan tanda dengan gerak fisiknya.
-        polarity = -1.0 if motor < 2 else 1.0
-        physical_feedforward = polarity * feedforward
-        measured = self.motor_speed[motor]
-        if (measured is None or
-                now - self.motor_encoder_time[motor] >
-                self.speed_feedback_timeout):
-            return 0.0
-        target = physical_feedforward * self.speed_at_full_duty
-        self.last_speed_targets[motor] = target
-        error = target - measured
-        previous_time = self.speed_previous_time[motor]
-        dt = now - previous_time if previous_time > 0.0 else 0.0
-        derivative = 0.0
-        if 0.0 < dt < 0.25:
-            candidate_integral = clamp(
-                self.speed_integral[motor] + error * dt,
-                -self.speed_integral_limit,
-                self.speed_integral_limit)
-            derivative = (
-                error - self.speed_previous_error[motor]) / dt
-        else:
-            candidate_integral = self.speed_integral[motor]
-        correction = (
-            self.speed_kp * error +
-            self.speed_ki * candidate_integral +
-            self.speed_kd * derivative)
-        physical_output = physical_feedforward + correction
-        # PID hanya boleh mengubah besar duty, tidak membalik arah perintah.
-        if physical_feedforward > 0.0:
-            physical_output = clamp(
-                physical_output, 0.0, self.motor_duty_limit)
-        else:
-            physical_output = clamp(
-                physical_output, -self.motor_duty_limit, 0.0)
-        output = polarity * physical_output
-        # Anti-windup: integrate only when the output is not saturated.
-        if abs(physical_output) < self.motor_duty_limit - 1e-6:
-            self.speed_integral[motor] = candidate_integral
-        self.speed_previous_error[motor] = error
-        self.speed_previous_time[motor] = now
-        return output
-
-    def publish_drive(self, forward: float, turn_left: float) -> None:
-        # M0/M1 kanan memakai duty negatif untuk maju. M2/M3 kiri positif.
-        right = clamp(
-            -(forward + turn_left), -self.motor_duty_limit,
-            self.motor_duty_limit)
-        left = clamp(
-            forward - turn_left, -self.motor_duty_limit,
-            self.motor_duty_limit)
-        feedforward = (right, right, left, left)
-        if self.speed_pid_enabled:
-            now = time.monotonic()
-            commands = tuple(
-                self.speed_pid_command(i, value, now)
-                for i, value in enumerate(feedforward))
-        else:
-            commands = feedforward
-        self.publish_motor_commands(commands)
-
     def stop_motors(self) -> None:
-        self.reset_speed_pid()
         for _ in range(3):
-            self.publish_motor_commands((0.0, 0.0, 0.0, 0.0))
+            self.publish_drive(0.0, 0.0)
 
     def begin_avoidance(self) -> None:
         self.avoid_direction = (
@@ -438,19 +308,6 @@ class WaypointNavigator(Node):
         if not self.active:
             self.publish_drive(0.0, 0.0)
             return
-        if self.speed_pid_enabled:
-            stale = [
-                index for index in range(4)
-                if (self.motor_speed[index] is None or
-                    now - self.motor_encoder_time[index] >
-                    self.speed_feedback_timeout)
-            ]
-            if stale:
-                self.get_logger().error(
-                    f'Feedback encoder stale pada motor {stale}; STOP')
-                self.active = False
-                self.stop_motors()
-                return
         if self.pose is None or now - self.last_odom_time > 0.6:
             self.get_logger().error('Odometri stale; STOP')
             self.active = False
@@ -482,15 +339,6 @@ class WaypointNavigator(Node):
                 f'{self.state} -> {name}: pose=({x:.2f},{y:.2f},'
                 f'{math.degrees(yaw):.1f}deg), jarak={distance:.2f}m, '
                 f'front={self.front_clearance:.2f}m')
-            if self.speed_pid_enabled:
-                speed_text = ', '.join(
-                    'NA' if value is None else f'{value:.1f}'
-                    for value in self.motor_speed)
-                duty_text = ', '.join(
-                    f'{value:.2f}' for value in self.last_motor_commands)
-                self.get_logger().info(
-                    f'PID speed M0..M3=[{speed_text}] m/s, '
-                    f'duty=[{duty_text}]')
             self.next_log_time = now + 1.0
 
         if distance <= self.position_tolerance:
