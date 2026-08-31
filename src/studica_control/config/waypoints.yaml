@@ -1,0 +1,38 @@
+# "map": koordinat A-D dan start_pose diisi dari peta juri. Program otomatis
+# mengubahnya menjadi koordinat lokal odometri. Gunakan "local" jika titik
+# sudah dihitung relatif terhadap start robot.
+coordinate_mode: map
+
+# Pose robot ketika tombol start ditekan, dalam frame peta juri.
+# yaw_deg=0 berarti depan robot sejajar sumbu +X peta.
+start_pose: {x: 0.00, y: 0.00, yaw_deg: 0.0}
+
+# Koordinat titik dalam meter pada frame peta juri.
+waypoints:
+  A: {x: 1.00, y: 0.00}
+  B: {x: 1.00, y: 1.00}
+  C: {x: 0.00, y: 1.00}
+  D: {x: 0.00, y: 0.00}
+
+# Urutan dapat diubah di sini atau melalui --sequence A,B,D,C.
+sequence: [A, B, C, D]
+
+sensor: titan0
+
+motion:
+  forward_duty: 0.12
+  minimum_duty: 0.10
+  turn_duty: 0.30
+  heading_kp: 0.18
+  distance_kp: 0.20
+  position_tolerance: 0.12
+  turn_tolerance_deg: 6.0
+  drive_heading_limit_deg: 25.0
+
+obstacle_avoidance:
+  enabled: true
+  stop_distance: 0.55
+  clear_distance: 0.75
+  avoid_angle_deg: 55.0
+  avoid_step_distance: 0.60
+  timeout: 12.0
