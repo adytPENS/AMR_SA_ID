@@ -7,3 +7,6 @@ wheel_odometry:
     max_encoder_delta: 0.25
     odom_frame: "odom"
     base_frame: "base_link"
+    use_imu_yaw: true
+    imu_topic: "/imu"
+    max_imu_delta: 0.50

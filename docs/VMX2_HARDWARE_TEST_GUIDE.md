@@ -324,7 +324,7 @@ bash scripts/start_mapping.sh
 Skrip ini memeriksa `/scan` dan keempat topic encoder, lalu menjalankan:
 
 ```text
-wheel_odometry.py -> /odom dan odom -> base_link
+wheel_odometry.py -> jarak encoder + yaw IMU, /odom dan odom -> base_link
 slam_toolbox      -> /map dan map -> odom
 ```
 
