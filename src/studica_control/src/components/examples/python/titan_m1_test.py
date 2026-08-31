@@ -13,9 +13,11 @@ from rclpy.node import Node
 from std_msgs.msg import Float64
 from studica_control.srv import SetData
 
+from motor_speed_pid import MotorSpeedPID
+
 
 class TitanM1Test(Node):
-    def __init__(self, sensor: str, motor: int) -> None:
+    def __init__(self, sensor: str, motor: int, args) -> None:
         super().__init__('titan_m1_test')
         prefix = f'/{sensor}/m_{motor}'
         self.command_pub = self.create_publisher(Float64, f'{prefix}/cmd', 10)
@@ -24,9 +26,16 @@ class TitanM1Test(Node):
         self.client = self.create_client(SetData, f'/{sensor}/titan_cmd')
         self.encoder = None
         self.rpm = None
+        self.pid = MotorSpeedPID(
+            polarity=(-1.0 if motor < 2 else 1.0),
+            speed_at_full_duty=args.speed_at_full_duty,
+            kp=args.pid_kp,
+            ki=args.pid_ki,
+            duty_limit=args.duty_limit)
 
     def _on_encoder(self, msg: Float64) -> None:
         self.encoder = msg.data
+        self.pid.update_encoder(float(msg.data), time.monotonic())
 
     def _on_rpm(self, msg: Float64) -> None:
         self.rpm = msg.data
@@ -53,6 +62,18 @@ class TitanM1Test(Node):
             return False
         return True
 
+    def titan_command(self, command: str, motor: int, speed: float = 0.0) -> bool:
+        if not self.client.wait_for_service(timeout_sec=2.0):
+            return False
+        request = SetData.Request()
+        request.params = command
+        request.initparams.n_encoder = motor
+        request.initparams.speed = float(speed)
+        future = self.client.call_async(request)
+        rclpy.spin_until_future_complete(self, future, timeout_sec=2.0)
+        response = future.result()
+        return bool(response and response.success)
+
     def stop(self) -> None:
         # Kirim beberapa kali agar perintah nol diterima meski discovery baru selesai.
         for _ in range(5):
@@ -69,6 +90,12 @@ def parse_args():
                         help='daya motor -1.0..1.0 (default: 0.15)')
     parser.add_argument('--duration', type=float, default=3.0,
                         help='durasi bergerak dalam detik (default: 3)')
+    parser.add_argument('--pid', action='store_true',
+                        help='aktifkan PID speed berbasis encoder')
+    parser.add_argument('--speed-at-full-duty', type=float, default=0.63)
+    parser.add_argument('--pid-kp', type=float, default=0.25)
+    parser.add_argument('--pid-ki', type=float, default=0.10)
+    parser.add_argument('--duty-limit', type=float, default=0.25)
     args, _ = parser.parse_known_args()
     if not 0 <= args.motor <= 3:
         parser.error('--motor harus 0 sampai 3')
@@ -82,7 +109,7 @@ def parse_args():
 def main() -> None:
     args = parse_args()
     rclpy.init()
-    node = TitanM1Test(args.sensor, args.motor)
+    node = TitanM1Test(args.sensor, args.motor, args)
 
     try:
         node.get_logger().info('Menunggu koneksi ke Titan component...')
@@ -94,24 +121,41 @@ def main() -> None:
         while time.monotonic() < wait_until and rclpy.ok():
             rclpy.spin_once(node, timeout_sec=0.05)
 
+        if args.pid and not node.pid.ready(time.monotonic()):
+            node.get_logger().error(
+                f'PID ditolak: feedback encoder M{args.motor} belum tersedia')
+            return
+
         node.get_logger().info(
             f'Menjalankan M{args.motor} (m_{args.motor}) duty={args.duty:.2f} '
             f'selama {args.duration:.1f} detik')
         started = time.monotonic()
         next_log = started
         while rclpy.ok() and time.monotonic() - started < args.duration:
-            node.publish_speed(args.duty)
+            command = (
+                node.pid.calculate(args.duty, time.monotonic())
+                if args.pid else args.duty)
+            node.publish_speed(command)
             rclpy.spin_once(node, timeout_sec=0.05)
             if time.monotonic() >= next_log:
                 enc = 'belum ada data' if node.encoder is None else f'{node.encoder:.0f} tick'
                 rpm = 'belum ada data' if node.rpm is None else f'{node.rpm:.1f} rpm'
-                node.get_logger().info(f'encoder={enc}, rpm={rpm}')
+                speed = (
+                    'belum ada data' if node.pid.speed is None else
+                    f'{node.pid.speed:.3f} m/s')
+                node.get_logger().info(
+                    f'encoder={enc}, rpm={rpm}, speed={speed}, '
+                    f'duty_out={command:.3f}')
                 next_log += 0.5
 
+    except RuntimeError as error:
+        node.get_logger().error(f'PID dihentikan: {error}')
     except KeyboardInterrupt:
         node.get_logger().warning('Tes dihentikan oleh pengguna')
     finally:
         node.stop()
+        node.titan_command('set_speed', args.motor, 0.0)
+        node.titan_command('disable', args.motor)
         node.get_logger().info(
             f'STOP — hasil akhir: encoder={node.encoder}, rpm={node.rpm}')
         node.destroy_node()
