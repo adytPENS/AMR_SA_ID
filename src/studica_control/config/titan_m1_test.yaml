@@ -2,6 +2,14 @@ control_server:
   ros__parameters:
     use_sim_time: false
 
+    # navX onboard VMX2. Aktifkan di proses yang sama dengan Titan agar hanya
+    # satu control_server yang mengakses hardware VMX.
+    imu:
+      enabled: true
+      name: "imu"
+      topic: "imu"
+      frame_id: "imu_link"
+
     # Satu Titan pada CAN ID 42. Ubah can_id agar sama dengan konfigurasi
     # DIP switch / CAN ID pada Titan yang akan diuji.
     titan:
@@ -15,20 +23,21 @@ control_server:
         enable_freshness: true
 
         # Label fisik Titan sama dengan indeks driver: M1 = m_1.
-        # dist_per_tick 1.0 membuat nilai /encoder berupa hitungan tick mentah.
+        # Maverick 50.9:1: 1221.6 count/output-rev; roda diameter 0.12 m.
+        # pi * 0.12 / 1221.6 = 0.000308604386 meter per tick.
         m_0:
           encoder_mode: "quadrature"
-          dist_per_tick: 1.0
+          dist_per_tick: 0.000308604386
           invert_motor: false
           invert_encoder: false
           invert_rpm: false
 
         m_1:
           encoder_mode: "quadrature"
-          dist_per_tick: 1.0
+          dist_per_tick: 0.000308604386
         m_2:
           encoder_mode: "quadrature"
-          dist_per_tick: 1.0
+          dist_per_tick: 0.000308604386
         m_3:
           encoder_mode: "quadrature"
-          dist_per_tick: 1.0
+          dist_per_tick: 0.000308604386
