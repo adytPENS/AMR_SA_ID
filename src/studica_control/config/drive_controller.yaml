@@ -4,7 +4,7 @@
 #   mecanum
 #   x_drive
 drive:
-  model: differential
+  model: differential_all_terrain
 
   # Semua ukuran dalam meter dan diukur dari titik tengah roda.
   wheel_diameter: 0.12
