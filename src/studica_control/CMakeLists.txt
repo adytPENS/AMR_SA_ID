@@ -232,6 +232,7 @@ install(TARGETS ${cpp_example_targets}
 
 # ---- Python examples ----
 set(python_example_scripts
+  src/components/examples/python/motor_speed_pid.py
   src/components/examples/python/titan_example.py
   src/components/examples/python/titan_m1_test.py
   src/components/examples/python/titan_keyboard_teleop.py

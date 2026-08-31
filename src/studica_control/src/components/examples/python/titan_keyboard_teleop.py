@@ -28,6 +28,8 @@ import rclpy
 from rclpy.node import Node
 from std_msgs.msg import Float64
 
+from motor_speed_pid import MotorSpeedPID
+
 
 class TitanKeyboardTeleop(Node):
     def __init__(self, sensor: str, args) -> None:
@@ -37,17 +39,17 @@ class TitanKeyboardTeleop(Node):
             for motor in range(4)
         ]
         self.encoder_values = [None] * 4
-        self.encoder_times = [0.0] * 4
-        self.wheel_speeds = [None] * 4
         self.pid_enabled = args.pid
-        self.speed_at_full_duty = args.speed_at_full_duty
-        self.pid_kp = args.pid_kp
-        self.pid_ki = args.pid_ki
-        self.pid_integrals = [0.0] * 4
-        self.pid_last_times = [0.0] * 4
-        self.pid_integral_limit = 0.50
-        self.feedback_timeout = 0.30
-        self.duty_limit = args.duty_limit
+        self.speed_controllers = [
+            MotorSpeedPID(
+                polarity=(-1.0 if motor < 2 else 1.0),
+                speed_at_full_duty=args.speed_at_full_duty,
+                kp=args.pid_kp,
+                ki=args.pid_ki,
+                duty_limit=args.duty_limit,
+            )
+            for motor in range(4)
+        ]
         self.encoder_subscriptions = [
             self.create_subscription(
                 Float64,
@@ -61,31 +63,19 @@ class TitanKeyboardTeleop(Node):
     def encoder_callback(self, motor: int, msg: Float64) -> None:
         now = time.monotonic()
         position = float(msg.data)
-        previous = self.encoder_values[motor]
-        previous_time = self.encoder_times[motor]
-        if previous is not None and previous_time > 0.0:
-            dt = now - previous_time
-            if 0.01 <= dt <= 0.25:
-                raw = (position - previous) / dt
-                old = self.wheel_speeds[motor]
-                self.wheel_speeds[motor] = (
-                    raw if old is None else 0.35 * raw + 0.65 * old)
         self.encoder_values[motor] = position
-        self.encoder_times[motor] = now
+        self.speed_controllers[motor].update_encoder(position, now)
 
     def encoders_ready(self) -> bool:
         return all(value is not None for value in self.encoder_values)
 
     def pid_ready(self) -> bool:
         now = time.monotonic()
-        return all(
-            speed is not None and now - stamp <= self.feedback_timeout
-            for speed, stamp in zip(self.wheel_speeds, self.encoder_times)
-        )
+        return all(controller.ready(now) for controller in self.speed_controllers)
 
     def reset_pid(self) -> None:
-        self.pid_integrals = [0.0] * 4
-        self.pid_last_times = [0.0] * 4
+        for controller in self.speed_controllers:
+            controller.reset()
 
     def command(self, speeds, apply_pid: bool = True) -> bool:
         outputs = list(speeds)
@@ -97,31 +87,9 @@ class TitanKeyboardTeleop(Node):
             else:
                 accepted = True
                 now = time.monotonic()
-                polarities = (-1.0, -1.0, 1.0, 1.0)
                 for motor, electrical_target in enumerate(speeds):
-                    polarity = polarities[motor]
-                    physical_ff = polarity * electrical_target
-                    target_speed = physical_ff * self.speed_at_full_duty
-                    error = target_speed - self.wheel_speeds[motor]
-                    last = self.pid_last_times[motor]
-                    dt = now - last if last > 0.0 else 0.0
-                    integral = self.pid_integrals[motor]
-                    if 0.0 < dt < 0.25:
-                        integral = max(
-                            -self.pid_integral_limit,
-                            min(self.pid_integral_limit, integral + error * dt))
-                    physical_output = physical_ff + self.pid_kp * error + self.pid_ki * integral
-                    # PI tidak boleh membalik arah yang ditentukan W/A/S/D.
-                    if physical_ff > 0.0:
-                        physical_output = max(0.0, min(self.duty_limit, physical_output))
-                    elif physical_ff < 0.0:
-                        physical_output = max(-self.duty_limit, min(0.0, physical_output))
-                    else:
-                        physical_output = 0.0
-                    outputs[motor] = polarity * physical_output
-                    if abs(physical_output) < self.duty_limit - 1e-6:
-                        self.pid_integrals[motor] = integral
-                    self.pid_last_times[motor] = now
+                    outputs[motor] = self.speed_controllers[motor].calculate(
+                        electrical_target, now)
         else:
             accepted = True
             if not any(abs(v) > 1e-6 for v in speeds):
