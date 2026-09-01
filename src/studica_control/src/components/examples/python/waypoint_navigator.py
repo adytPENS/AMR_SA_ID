@@ -431,7 +431,8 @@ def main() -> None:
     except (KeyboardInterrupt, ExternalShutdownException):
         node.get_logger().warning('Ctrl+C; STOP')
     finally:
-        node.stop_motors()
+        if rclpy.ok():
+            node.stop_motors()
         node.destroy_node()
         if rclpy.ok():
             rclpy.shutdown()
