@@ -22,7 +22,7 @@ sequence: [A, B, C, D]
 start_button:
   enabled: true
   topic: "/start_button/state"
-  active_high: false
+  active_high: true
   debounce_ms: 250
 
 motion:

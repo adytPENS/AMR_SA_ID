@@ -10,14 +10,14 @@ control_server:
       topic: "imu"
       frame_id: "imu_link"
 
-    # Tombol start fisik pada DIO 15, active-low (tekan = LOW).
+    # Tombol start fisik pada DIO 15, active-high (tekan = HIGH).
     dio:
       enabled: true
       sensors: ["start_button"]
       start_button:
-        pin: 15
+        pin: 10
         type: "input"
-        interrupt_edge: "falling"
+        interrupt_edge: "rising"
         debounce_ms: 250
 
     # Satu Titan pada CAN ID 42. Ubah can_id agar sama dengan konfigurasi

@@ -43,6 +43,15 @@ with open(sys.argv[1], encoding='utf-8') as stream:
 print('true' if config.get('obstacle_avoidance', {}).get('enabled', True) else 'false')
 PY
 )"
+REQUIRE_BUTTON="$(python3 - "$WAYPOINTS" <<'PY'
+import sys
+import yaml
+
+with open(sys.argv[1], encoding='utf-8') as stream:
+    config = yaml.safe_load(stream) or {}
+print('true' if config.get('start_button', {}).get('enabled', False) else 'false')
+PY
+)"
 
 REQUIRED_TOPICS=(
   /imu
@@ -53,6 +62,9 @@ REQUIRED_TOPICS=(
 )
 if [[ "$REQUIRE_SCAN" == "true" ]]; then
   REQUIRED_TOPICS+=(/scan)
+fi
+if [[ "$REQUIRE_BUTTON" == "true" ]]; then
+  REQUIRED_TOPICS+=(/start_button/state)
 fi
 
 for topic in "${REQUIRED_TOPICS[@]}"; do
