@@ -15,16 +15,16 @@ start_button:
   debounce_ms: 250
 
 motion:
-  linear_speed: 0.15
-  minimum_linear_speed: 0.08
-  angular_speed: 0.50
+  linear_speed: 0.30
+  minimum_linear_speed: 0.10
+  angular_speed: 0.90
   heading_kp: 1.20
   distance_kp: 0.50
   max_heading_correction: 0.30
   position_tolerance: 0.10
-  turn_tolerance_deg: 6.0
+  turn_tolerance_deg: 8.0
   drive_heading_limit_deg: 25.0
-  turn_timeout: 4.0
+  turn_timeout: 7.0
 
 # Dinonaktifkan hanya untuk mengisolasi odometry dan heading pada pengujian.
 # Pastikan lintasan menuju B benar-benar kosong.
