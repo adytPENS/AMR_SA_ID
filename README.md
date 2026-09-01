@@ -8,6 +8,7 @@ A ROS2 hardware abstraction layer for the **Studica Robotics VMX** platform. Eac
 
 - [AMR Drive Controller — Bahasa Indonesia](docs/AMR_DRIVE_CONTROLLER_GUIDE.md)
 - [AMR Drive Controller — English](docs/AMR_DRIVE_CONTROLLER_GUIDE_EN.md)
+- [Remote Keyboard AMR — Bahasa Indonesia](docs/KEYBOARD_REMOTE_GUIDE.md)
 - [Waypoint Navigation — Bahasa Indonesia](docs/WAYPOINT_NAVIGATION_GUIDE.md)
 - [Waypoint Navigation — English](docs/WAYPOINT_NAVIGATION_GUIDE_EN.md)
 - [VMX2 Hardware Test Guide](docs/VMX2_HARDWARE_TEST_GUIDE.md)
