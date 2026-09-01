@@ -6,8 +6,6 @@ waypoints:
   A: {x: 0.50, y: 0.00}
 
 sequence: [A]
-sensor: titan0
-
 start_button:
   enabled: false
   topic: "/start_button/state"
@@ -15,11 +13,12 @@ start_button:
   debounce_ms: 250
 
 motion:
-  forward_duty: 0.50
-  minimum_duty: 0.10
-  turn_duty: 0.50
-  heading_kp: 0.18
-  distance_kp: 1.20
+  linear_speed: 0.20
+  minimum_linear_speed: 0.08
+  angular_speed: 0.80
+  heading_kp: 1.50
+  distance_kp: 0.80
+  max_heading_correction: 0.40
   position_tolerance: 0.05
   turn_tolerance_deg: 6.0
   drive_heading_limit_deg: 25.0

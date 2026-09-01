@@ -17,8 +17,6 @@ waypoints:
 # Urutan dapat diubah di sini atau melalui --sequence A,B,D,C.
 sequence: [A, B, C, D]
 
-sensor: titan0
-
 # Aktifkan setelah tombol dipasang pada VMX DIO dan start_button diaktifkan
 # pada titan_m1_test.yaml. Manual start service tetap dapat digunakan.
 start_button:
@@ -28,11 +26,12 @@ start_button:
   debounce_ms: 250
 
 motion:
-  forward_duty: 0.12
-  minimum_duty: 0.10
-  turn_duty: 0.30
-  heading_kp: 0.18
-  distance_kp: 0.20
+  linear_speed: 0.35
+  minimum_linear_speed: 0.10
+  angular_speed: 1.20
+  heading_kp: 1.50
+  distance_kp: 0.80
+  max_heading_correction: 0.60
   position_tolerance: 0.12
   turn_tolerance_deg: 6.0
   drive_heading_limit_deg: 25.0

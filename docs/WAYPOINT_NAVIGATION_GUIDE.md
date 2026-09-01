@@ -6,6 +6,11 @@ Program ini ditujukan untuk pembelajaran dan tugas ketika koordinat titik
 diberikan oleh juri. Robot memakai pose lokal dari encoder dan IMU, lalu
 bergerak menuju A, B, C, dan D sesuai urutan yang diberikan.
 
+> **Arsitektur terbaru:** navigator hanya menerbitkan `/cmd_vel`. Inverse
+> kinematics, PID M0–M3, polarity, dan duty ditangani oleh
+> `drive_controller.py`. Lihat
+> [panduan drive controller](AMR_DRIVE_CONTROLLER_GUIDE.md).
+
 ## Sistem koordinat
 
 Robot harus ditempatkan pada titik asal dengan arah yang diketahui:
@@ -70,7 +75,7 @@ sequence: [A, B, D, C]
 
 Jalankan `control_server`, zero IMU, inisialisasi encoder, dan driver LiDAR
 seperti pada panduan hardware. Jangan menjalankan keyboard bersamaan dengan
-navigator karena keduanya menerbitkan perintah motor.
+navigator karena keduanya menerbitkan `/cmd_vel`.
 
 Cara paling mudah adalah menjalankan skrip berikut setelah hardware siap:
 
@@ -79,7 +84,7 @@ cd /home/vmx/studica_ws
 bash scripts/start_waypoint_mode.sh
 ```
 
-Skrip menjalankan odometri, mereset pose ke `(0,0,0)`, dan memuat navigator.
+Skrip menjalankan odometri, drive controller, mereset pose ke `(0,0,0)`, dan memuat navigator.
 Motor masih STOP sampai service start dipanggil.
 
 Cara manual untuk menjalankan odometri tanpa SLAM:

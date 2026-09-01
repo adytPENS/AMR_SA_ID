@@ -8,7 +8,7 @@ Input:
   /waypoint_navigator/stop      std_srvs/Trigger
 
 Output:
-  /titan0/m_0..m_3/cmd          std_msgs/Float64
+  /cmd_vel                      geometry_msgs/Twist
 
 Koordinat waypoint dinyatakan dalam meter terhadap pose odom (0, 0, 0).
 Obstacle avoidance bersifat reaktif dan tidak menggantikan global planner.
@@ -22,12 +22,13 @@ from typing import Dict, List, Optional, Tuple
 
 import rclpy
 import yaml
+from geometry_msgs.msg import Twist
 from nav_msgs.msg import Odometry
 from rclpy.executors import ExternalShutdownException
 from rclpy.node import Node
 from rclpy.qos import qos_profile_sensor_data
 from sensor_msgs.msg import LaserScan
-from std_msgs.msg import Bool, Float64
+from std_msgs.msg import Bool
 from std_srvs.srv import Empty, Trigger
 
 
@@ -80,11 +81,14 @@ class WaypointNavigator(Node):
 
         motion = config.get('motion', {})
         obstacle = config.get('obstacle_avoidance', {})
-        self.forward_duty = float(motion.get('forward_duty', 0.10))
-        self.minimum_duty = float(motion.get('minimum_duty', 0.07))
-        self.turn_duty = float(motion.get('turn_duty', 0.30))
-        self.heading_kp = float(motion.get('heading_kp', 0.18))
-        self.distance_kp = float(motion.get('distance_kp', 0.20))
+        self.linear_speed = float(motion.get('linear_speed', 0.35))
+        self.minimum_linear_speed = float(
+            motion.get('minimum_linear_speed', 0.10))
+        self.angular_speed = float(motion.get('angular_speed', 1.2))
+        self.heading_kp = float(motion.get('heading_kp', 1.5))
+        self.distance_kp = float(motion.get('distance_kp', 0.8))
+        self.max_heading_correction = float(
+            motion.get('max_heading_correction', 0.6))
         self.position_tolerance = float(
             motion.get('position_tolerance', 0.12))
         self.turn_tolerance = math.radians(
@@ -107,11 +111,7 @@ class WaypointNavigator(Node):
         self.button_active_high = bool(button.get('active_high', True))
         self.button_debounce = float(button.get('debounce_ms', 250)) / 1000.0
 
-        sensor = str(config.get('sensor', 'titan0'))
-        self.motor_publishers = [
-            self.create_publisher(Float64, f'/{sensor}/m_{i}/cmd', 1)
-            for i in range(4)
-        ]
+        self.cmd_vel_publisher = self.create_publisher(Twist, '/cmd_vel', 10)
         self.create_subscription(Odometry, '/odom', self.odom_callback, 20)
         self.create_subscription(
             LaserScan, '/scan', self.scan_callback, qos_profile_sensor_data)
@@ -276,14 +276,10 @@ class WaypointNavigator(Node):
         self.state_started = time.monotonic()
 
     def publish_drive(self, forward: float, turn_left: float) -> None:
-        # M0/M1 kanan memakai duty negatif untuk maju. M2/M3 kiri positif.
-        right = clamp(-(forward + turn_left), -0.70, 0.70)
-        left = clamp(forward - turn_left, -0.70, 0.70)
-        commands = (right, right, left, left)
-        for publisher, value in zip(self.motor_publishers, commands):
-            msg = Float64()
-            msg.data = float(value)
-            publisher.publish(msg)
+        msg = Twist()
+        msg.linear.x = float(forward)
+        msg.angular.z = float(turn_left)
+        self.cmd_vel_publisher.publish(msg)
 
     def stop_motors(self) -> None:
         for _ in range(3):
@@ -362,17 +358,17 @@ class WaypointNavigator(Node):
                 self.set_state('DRIVE_TO_GOAL')
 
             if self.state == 'TURN_TO_GOAL':
-                turn = math.copysign(self.turn_duty, heading_error)
+                turn = math.copysign(self.angular_speed, heading_error)
                 self.publish_drive(0.0, turn)
             else:
                 forward = clamp(
                     self.distance_kp * distance,
-                    self.minimum_duty,
-                    self.forward_duty)
+                    self.minimum_linear_speed,
+                    self.linear_speed)
                 turn = clamp(
                     self.heading_kp * heading_error,
-                    -0.08,
-                    0.08)
+                    -self.max_heading_correction,
+                    self.max_heading_correction)
                 self.publish_drive(forward, turn)
             return
 
@@ -389,7 +385,7 @@ class WaypointNavigator(Node):
                 self.stop_motors()
             else:
                 self.publish_drive(
-                    0.0, math.copysign(self.turn_duty, avoid_error))
+                    0.0, math.copysign(self.angular_speed, avoid_error))
             return
 
         if self.state == 'AVOID_FORWARD':
@@ -408,8 +404,11 @@ class WaypointNavigator(Node):
                 self.set_state('TURN_TO_GOAL')
             else:
                 avoid_error = normalize_angle(self.avoid_target_yaw - yaw)
-                turn = clamp(self.heading_kp * avoid_error, -0.08, 0.08)
-                self.publish_drive(self.minimum_duty, turn)
+                turn = clamp(
+                    self.heading_kp * avoid_error,
+                    -self.max_heading_correction,
+                    self.max_heading_correction)
+                self.publish_drive(self.minimum_linear_speed, turn)
 
 
 def parse_args():

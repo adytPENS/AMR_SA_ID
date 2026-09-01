@@ -1,5 +1,10 @@
 # Waypoint Navigation Without SLAM — English
 
+> **Current architecture:** the navigator publishes `/cmd_vel` only. Inverse
+> kinematics, M0-M3 PID, polarity, and Titan duty are handled by
+> `drive_controller.py`. See the
+> [AMR drive controller guide](AMR_DRIVE_CONTROLLER_GUIDE_EN.md).
+
 Versi Bahasa Indonesia: [WAYPOINT_NAVIGATION_GUIDE.md](WAYPOINT_NAVIGATION_GUIDE.md)
 
 This program is intended for training and competition tasks where judges

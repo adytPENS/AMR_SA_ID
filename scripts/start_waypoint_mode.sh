@@ -5,6 +5,8 @@ PROJECT_ROOT="/home/vmx/studica_ws"
 ODOM_NODE="$PROJECT_ROOT/src/studica_control/src/components/examples/python/wheel_odometry.py"
 ODOM_PARAMS="$PROJECT_ROOT/src/studica_control/config/wheel_odometry.yaml"
 NAV_NODE="$PROJECT_ROOT/src/studica_control/src/components/examples/python/waypoint_navigator.py"
+DRIVE_NODE="$PROJECT_ROOT/src/studica_control/src/components/examples/python/drive_controller.py"
+DRIVE_CONFIG="$PROJECT_ROOT/src/studica_control/config/drive_controller.yaml"
 WAYPOINTS="${1:-$PROJECT_ROOT/src/studica_control/config/waypoints.yaml}"
 
 source /opt/ros/humble/setup.bash
@@ -15,7 +17,7 @@ set -u
 cleanup() {
   # Prevent SIGINT/SIGTERM received by child commands from re-entering cleanup.
   trap - EXIT INT TERM
-  echo "Menghentikan waypoint navigator dan wheel odometry..."
+  echo "Menghentikan waypoint, drive controller, dan wheel odometry..."
   timeout 2 ros2 service call /waypoint_navigator/stop std_srvs/srv/Trigger "{}" \
     >/dev/null 2>&1 || true
   # SetData/set_speed updates the duty stored by Titan's resend timer, so a
@@ -26,8 +28,8 @@ cleanup() {
       "{params: 'set_speed', initparams: {n_encoder: $motor, speed: 0.0}}" \
       >/dev/null 2>&1 || true
   done
-  kill "${NAV_PID:-}" "${ODOM_PID:-}" 2>/dev/null || true
-  wait "${NAV_PID:-}" "${ODOM_PID:-}" 2>/dev/null || true
+  kill "${NAV_PID:-}" "${DRIVE_PID:-}" "${ODOM_PID:-}" 2>/dev/null || true
+  wait "${NAV_PID:-}" "${DRIVE_PID:-}" "${ODOM_PID:-}" 2>/dev/null || true
 }
 trap cleanup EXIT INT TERM
 
@@ -77,6 +79,9 @@ if ! grep -Fxq '/wheel_odometry/reset' <<<"${SERVICE_LIST:-}"; then
 fi
 
 ros2 service call /wheel_odometry/reset std_srvs/srv/Empty "{}"
+
+python3 "$DRIVE_NODE" --config "$DRIVE_CONFIG" &
+DRIVE_PID=$!
 
 python3 "$NAV_NODE" --config "$WAYPOINTS" &
 NAV_PID=$!
