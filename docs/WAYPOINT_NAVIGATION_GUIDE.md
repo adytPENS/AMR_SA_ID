@@ -160,15 +160,16 @@ Edit bagian `motion` pada `waypoints.yaml`:
 
 ```yaml
 motion:
-  linear_speed: 0.35
+  linear_speed: 0.30
   minimum_linear_speed: 0.10
-  angular_speed: 1.20
-  heading_kp: 1.50
-  distance_kp: 0.80
-  max_heading_correction: 0.60
+  angular_speed: 0.90
+  heading_kp: 1.20
+  distance_kp: 0.50
+  max_heading_correction: 0.30
   position_tolerance: 0.12
-  turn_tolerance_deg: 6.0
+  turn_tolerance_deg: 8.0
   drive_heading_limit_deg: 25.0
+  turn_timeout: 7.0
 ```
 
 - `linear_speed`: batas kecepatan maju dalam m/s.
