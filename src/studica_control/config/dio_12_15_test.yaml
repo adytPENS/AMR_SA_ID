@@ -1,0 +1,40 @@
+control_server:
+  ros__parameters:
+    use_sim_time: false
+
+    # Tes terisolasi VMX digital output DIO 12, 13, 14, dan 15.
+    # Jangan jalankan bersamaan dengan konfigurasi light tower/waypoint.
+    dio:
+      enabled: true
+      sensors: ["dio12", "dio13", "dio14", "dio15"]
+
+      dio12:
+        pin: 12
+        type: "output"
+        interrupt_edge: "none"
+        debounce_ms: 0
+
+      dio13:
+        pin: 13
+        type: "output"
+        interrupt_edge: "none"
+        debounce_ms: 0
+
+      dio14:
+        pin: 14
+        type: "output"
+        interrupt_edge: "none"
+        debounce_ms: 0
+
+      dio15:
+        pin: 15
+        type: "output"
+        interrupt_edge: "none"
+        debounce_ms: 0
+
+    imu:
+      enabled: false
+    titan:
+      enabled: false
+    light_tower:
+      enabled: false

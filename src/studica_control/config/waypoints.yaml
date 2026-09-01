@@ -1,21 +1,37 @@
-# "map": koordinat A-D dan start_pose diisi dari peta juri. Program otomatis
-# mengubahnya menjadi koordinat lokal odometri. Gunakan "local" jika titik
-# sudah dihitung relatif terhadap start robot.
+# Konfigurasi multi-waypoint yang dibangun dari pengujian START -> B yang
+# sudah berhasil. Navigator membaca seluruh isi `sequence`, jadi jumlah titik
+# tidak dibatasi empat: tambahkan titik baru ke `waypoints`, lalu masukkan
+# namanya ke `sequence`.
+#
+# "map": koordinat waypoint dan start_pose diisi dari peta juri. Program
+# otomatis mengubahnya menjadi koordinat lokal odometri. Gunakan "local"
+# jika semua titik sudah dihitung relatif terhadap pose start robot.
 coordinate_mode: local
 
 # Pose robot ketika tombol start ditekan, dalam frame peta juri.
 # yaw_deg=0 berarti depan robot sejajar sumbu +X peta.
 start_pose: {x: 0.00, y: 0.00, yaw_deg: 0.0}
 
-# Koordinat titik dalam meter pada frame peta juri.
+# Contoh lintasan empat titik berbentuk persegi, dalam meter. Titik D kembali
+# ke pose start. Ganti koordinat ini dengan hasil pengukuran lintasan aktual.
 waypoints:
-  A: {x: 1.00, y: 0.00}
-  B: {x: 1.00, y: 1.00}
-  C: {x: 0.00, y: 1.00}
-  D: {x: 0.00, y: 0.00}
+  A: {x: 3.00, y: 1.50}
+  B: {x: 2.00, y: 0.50}
+  C: {x: 0.50, y: 1.00}
+  D: {x: 2.00, y: 1.50}
+  S: {x: 0.00, y: 0.00}  # Titik start, opsional
 
-# Urutan dapat diubah di sini atau melalui --sequence A,B,D,C.
-sequence: [A, B, C, D]
+# Robot menyelesaikan satu titik sebelum otomatis menuju titik berikutnya.
+# Untuk lebih dari empat titik, misalnya tambahkan:
+#   E: {x: 0.50, y: -0.50}
+# lalu ubah sequence menjadi [A, B, C, D, E].
+# Urutan juga dapat dioverride saat dijalankan: --sequence A,B,D,C.
+sequence:
+  - C
+  - B
+  - D
+  - A
+  - S
 
 # Aktifkan setelah tombol dipasang pada VMX DIO dan start_button diaktifkan
 # pada titan_m1_test.yaml. Manual start service tetap dapat digunakan.
@@ -25,21 +41,35 @@ start_button:
   active_high: false
   debounce_ms: 250
 
+stop_button:
+  enabled: true
+  topic: "/stop_button/state"
+  active_high: true
+  debounce_ms: 250
+
 motion:
   # Nilai tervalidasi pada pengujian START -> B.
   linear_speed: 0.30
   minimum_linear_speed: 0.10
-  angular_speed: 0.90
+  # Ditingkatkan agar putaran besar antar-waypoint tidak terlalu lambat.
+  angular_speed: 1.20
   heading_kp: 1.20
   distance_kp: 0.50
   max_heading_correction: 0.30
   position_tolerance: 0.12
   turn_tolerance_deg: 8.0
   drive_heading_limit_deg: 25.0
-  turn_timeout: 7.0
+  # C -> A membutuhkan putaran kanan sekitar 150 derajat. Pengujian 7 detik
+  # berhenti saat heading error tinggal 13 derajat, jadi beri margin aman.
+  turn_timeout: 10.0
+  # Setelah mencapai setiap titik, motor STOP selama waktu ini sebelum lanjut.
+  waypoint_pause_seconds: 7.0
 
+# Pengujian START -> B berhasil dengan avoidance nonaktif. Pertahankan false
+# saat validasi lintasan empat titik di area kosong. Aktifkan kembali hanya
+# setelah data /scan sudah tervalidasi dan lintasan dasar lulus pengujian.
 obstacle_avoidance:
-  enabled: true
+  enabled: false
   stop_distance: 0.55
   clear_distance: 0.75
   avoid_angle_deg: 55.0

@@ -1,0 +1,31 @@
+# Tes aman komunikasi start: target sama dengan pose odometri setelah reset.
+# Robot seharusnya tidak bergerak dan langsung menyelesaikan waypoint S.
+coordinate_mode: local
+start_pose: {x: 0.00, y: 0.00, yaw_deg: 0.0}
+
+waypoints:
+  S: {x: 0.00, y: 0.00}
+
+sequence: [S]
+
+start_button:
+  enabled: false
+  topic: "/start_button/state"
+  active_high: false
+  debounce_ms: 250
+
+motion:
+  linear_speed: 0.20
+  minimum_linear_speed: 0.08
+  angular_speed: 0.80
+  heading_kp: 1.20
+  distance_kp: 0.50
+  max_heading_correction: 0.30
+  position_tolerance: 0.12
+  turn_tolerance_deg: 8.0
+  drive_heading_limit_deg: 25.0
+  turn_timeout: 5.0
+  waypoint_pause_seconds: 0.0
+
+obstacle_avoidance:
+  enabled: false

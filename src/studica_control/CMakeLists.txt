@@ -233,6 +233,7 @@ install(TARGETS ${cpp_example_targets}
 # ---- Python examples ----
 set(python_example_scripts
   src/components/examples/python/dio_input_monitor.py
+  src/components/examples/python/start_stop_button_monitor.py
   src/components/examples/python/drive_controller.py
   src/components/examples/python/drive_kinematics.py
   src/components/examples/python/motor_speed_pid.py

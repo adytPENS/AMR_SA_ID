@@ -1,0 +1,26 @@
+control_server:
+  ros__parameters:
+    use_sim_time: false
+
+    # Tes terisolasi push START/STOP active-low pada VMX DIO 10 dan 11.
+    dio:
+      enabled: true
+      sensors: ["start_button", "stop_button"]
+      start_button:
+        pin: 10
+        type: "input"
+        interrupt_edge: "falling"
+        debounce_ms: 250
+      stop_button:
+        pin: 11
+        type: "input"
+        # Wiring STOP terukur active-high: tekan menghasilkan HIGH.
+        interrupt_edge: "rising"
+        debounce_ms: 250
+
+    imu:
+      enabled: false
+    titan:
+      enabled: false
+    light_tower:
+      enabled: false

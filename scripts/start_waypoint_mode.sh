@@ -1,7 +1,8 @@
 #!/usr/bin/env bash
 set -eo pipefail
 
-PROJECT_ROOT="/home/vmx/studica_ws"
+SCRIPT_DIR="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)"
+PROJECT_ROOT="$(cd -- "$SCRIPT_DIR/.." && pwd)"
 ODOM_NODE="$PROJECT_ROOT/src/studica_control/src/components/examples/python/wheel_odometry.py"
 ODOM_PARAMS="$PROJECT_ROOT/src/studica_control/config/wheel_odometry.yaml"
 NAV_NODE="$PROJECT_ROOT/src/studica_control/src/components/examples/python/waypoint_navigator.py"
@@ -33,7 +34,7 @@ cleanup() {
 }
 trap cleanup EXIT INT TERM
 
-TOPIC_LIST="$(timeout 15 ros2 topic list)"
+TOPIC_LIST="$(timeout 15 ros2 topic list --no-daemon --spin-time 2)"
 REQUIRE_SCAN="$(python3 - "$WAYPOINTS" <<'PY'
 import sys
 import yaml
@@ -52,6 +53,15 @@ with open(sys.argv[1], encoding='utf-8') as stream:
 print('true' if config.get('start_button', {}).get('enabled', False) else 'false')
 PY
 )"
+REQUIRE_STOP_BUTTON="$(python3 - "$WAYPOINTS" <<'PY'
+import sys
+import yaml
+
+with open(sys.argv[1], encoding='utf-8') as stream:
+    config = yaml.safe_load(stream) or {}
+print('true' if config.get('stop_button', {}).get('enabled', False) else 'false')
+PY
+)"
 
 REQUIRED_TOPICS=(
   /imu
@@ -66,6 +76,9 @@ fi
 if [[ "$REQUIRE_BUTTON" == "true" ]]; then
   REQUIRED_TOPICS+=(/start_button/state)
 fi
+if [[ "$REQUIRE_STOP_BUTTON" == "true" ]]; then
+  REQUIRED_TOPICS+=(/stop_button/state)
+fi
 
 for topic in "${REQUIRED_TOPICS[@]}"; do
   if ! grep -Fxq "$topic" <<<"$TOPIC_LIST"; then
@@ -78,7 +91,7 @@ python3 "$ODOM_NODE" --ros-args --params-file "$ODOM_PARAMS" &
 ODOM_PID=$!
 
 for _ in 1 2 3 4 5 6 7 8 9 10; do
-  SERVICE_LIST="$(timeout 5 ros2 service list || true)"
+  SERVICE_LIST="$(timeout 5 ros2 service list --no-daemon --spin-time 1 || true)"
   if grep -Fxq '/wheel_odometry/reset' <<<"$SERVICE_LIST"; then
     break
   fi
@@ -97,6 +110,10 @@ DRIVE_PID=$!
 
 python3 "$NAV_NODE" --config "$WAYPOINTS" &
 NAV_PID=$!
+
+# Navigator menulis status C/R/G/Y langsung ke topic DIO setiap 0,5 detik.
+# Beri waktu satu siklus agar kondisi awal red solid sudah terkirim.
+sleep 1
 
 echo "Mode waypoint siap, motor masih STOP."
 echo "Mulai dari terminal lain:"

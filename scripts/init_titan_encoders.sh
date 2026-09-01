@@ -1,7 +1,8 @@
 #!/usr/bin/env bash
 set -eo pipefail
 
-PROJECT_ROOT="/home/vmx/studica_ws"
+SCRIPT_DIR="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)"
+PROJECT_ROOT="$(cd -- "$SCRIPT_DIR/.." && pwd)"
 DIST_PER_TICK="0.000308604386"
 
 source /opt/ros/humble/setup.bash
@@ -10,7 +11,8 @@ export RMW_IMPLEMENTATION=rmw_cyclonedds_cpp
 set -u
 
 SERVICE="/titan0/titan_cmd"
-if ! timeout 10 ros2 service type "$SERVICE" >/dev/null 2>&1; then
+if ! timeout 5 ros2 service list --no-daemon --spin-time 2 2>/dev/null | \
+    grep -Fxq "$SERVICE"; then
   echo "ERROR: $SERVICE belum tersedia. Jalankan control_server dahulu." >&2
   exit 1
 fi

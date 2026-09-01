@@ -13,6 +13,74 @@ A ROS2 hardware abstraction layer for the **Studica Robotics VMX** platform. Eac
 - [Waypoint Navigation — English](docs/WAYPOINT_NAVIGATION_GUIDE_EN.md)
 - [VMX2 Hardware Test Guide](docs/VMX2_HARDWARE_TEST_GUIDE.md)
 
+## Competition waypoint quick start
+
+Versi AMR ini menyediakan PID kecepatan, empat model kinematika
+(`differential`, `differential_all_terrain`, `mecanum`, dan `x_drive`),
+navigasi multi-waypoint, lampu status digital, serta tombol START/STOP.
+
+### Instalasi pada komputer/VMX lain
+
+```bash
+cd ~
+git clone https://github.com/adytPENS/AMR_SA_ID.git studica_ws
+cd ~/studica_ws
+
+cd drivers
+make
+sudo make install
+
+cd ~/studica_ws
+source /opt/ros/humble/setup.bash
+colcon build --packages-select studica_control
+source install/setup.bash
+
+# Jalankan satu kali setelah build pertama atau rebuild komponen C++.
+./scripts/setup_permissions.sh "$PWD"
+```
+
+Konfigurasi kompetisi berada di:
+
+```text
+src/studica_control/config/titan_m1_test.yaml
+src/studica_control/config/drive_controller.yaml
+src/studica_control/config/wheel_odometry.yaml
+src/studica_control/config/waypoints.yaml
+```
+
+Pemetaan digital saat ini:
+
+```text
+START (active-low)  DIO 10
+STOP  (active-high) DIO 11
+Control/C           DIO 12
+Red                 DIO 13
+Green               DIO 14
+Yellow              DIO 15
+```
+
+Letakkan robot di `S/home` dan arahkan sesuai heading awal. Jalankan seluruh
+stack dari satu terminal:
+
+```bash
+cd ~/studica_ws
+./scripts/start_full_waypoint.sh
+```
+
+Tunggu sampai muncul `SEMUA SIAP`, lalu tekan push START DIO 10. Robot tidak
+melakukan auto-start. Push STOP DIO 11 menghentikan navigator dan motor.
+
+Jika terminal utama tidak dapat dihentikan, buka terminal lain dan jalankan:
+
+```bash
+cd ~/studica_ws
+./scripts/stop_full_waypoint.sh
+```
+
+Setelah hanya mengubah YAML atau Python source, skrip source-tree langsung
+membaca perubahan. Jalankan `colcon build --packages-select studica_control`
+kembali jika CMake, interface ROS, atau komponen C++ berubah.
+
 ---
 
 ## Table of Contents

@@ -96,6 +96,8 @@ class WaypointNavigator(Node):
         self.drive_heading_limit = math.radians(
             float(motion.get('drive_heading_limit_deg', 25.0)))
         self.turn_timeout = float(motion.get('turn_timeout', 6.0))
+        self.waypoint_pause = max(
+            0.0, float(motion.get('waypoint_pause_seconds', 0.0)))
 
         self.avoidance_enabled = bool(obstacle.get('enabled', True))
         self.stop_distance = float(obstacle.get('stop_distance', 0.55))
@@ -111,6 +113,14 @@ class WaypointNavigator(Node):
             button.get('topic', '/start_button/state'))
         self.button_active_high = bool(button.get('active_high', True))
         self.button_debounce = float(button.get('debounce_ms', 250)) / 1000.0
+        stop_button = config.get('stop_button', {})
+        self.stop_button_enabled = bool(stop_button.get('enabled', False))
+        self.stop_button_topic = str(
+            stop_button.get('topic', '/stop_button/state'))
+        self.stop_button_active_high = bool(
+            stop_button.get('active_high', True))
+        self.stop_button_debounce = float(
+            stop_button.get('debounce_ms', 250)) / 1000.0
 
         self.cmd_vel_publisher = self.create_publisher(Twist, '/cmd_vel', 10)
         self.create_subscription(Odometry, '/odom', self.odom_callback, 20)
@@ -120,6 +130,14 @@ class WaypointNavigator(Node):
         if self.button_enabled:
             self.button_subscription = self.create_subscription(
                 Bool, self.button_topic, self.button_callback, 10)
+        self.stop_button_subscription = None
+        if self.stop_button_enabled:
+            self.stop_button_subscription = self.create_subscription(
+                Bool, self.stop_button_topic,
+                self.stop_button_callback, 10)
+        self.start_command_subscription = self.create_subscription(
+            Bool, '/waypoint_navigator/start_cmd',
+            self.start_command_callback, 10)
         self.create_service(
             Trigger, '/waypoint_navigator/start', self.start_callback)
         self.create_service(
@@ -127,6 +145,16 @@ class WaypointNavigator(Node):
         self.timer = self.create_timer(0.04, self.control_loop)
         self.odom_reset_client = self.create_client(
             Empty, '/wheel_odometry/reset')
+        self.light_control_publisher = self.create_publisher(
+            Bool, '/light_control/cmd', 10)
+        self.light_red_publisher = self.create_publisher(
+            Bool, '/light_red/cmd', 10)
+        self.light_green_publisher = self.create_publisher(
+            Bool, '/light_green/cmd', 10)
+        self.light_yellow_publisher = self.create_publisher(
+            Bool, '/light_yellow/cmd', 10)
+        self.light_tower_timer = self.create_timer(
+            0.5, self.update_light_tower)
 
         self.pose: Optional[Tuple[float, float, float]] = None
         self.last_odom_time = 0.0
@@ -144,8 +172,14 @@ class WaypointNavigator(Node):
         self.next_log_time = 0.0
         self.last_button_active: Optional[bool] = None
         self.last_button_press = 0.0
+        self.last_stop_button_active: Optional[bool] = None
+        self.last_stop_button_press = 0.0
         self.reset_future = None
         self.start_pending = False
+        self.desired_light_command = 'red'
+        self.sent_light_command: Optional[str] = None
+        # Tegaskan kondisi awal setelah seluruh client/state siap dibuat.
+        self.set_state('IDLE')
 
         points = ', '.join(
             f'{name}=({self.waypoints[name][0]:.2f}, '
@@ -159,6 +193,10 @@ class WaypointNavigator(Node):
             self.get_logger().info(
                 f'Start button aktif: {self.button_topic}, '
                 f'active_high={self.button_active_high}')
+        if self.stop_button_enabled:
+            self.get_logger().info(
+                f'Stop button aktif: {self.stop_button_topic}, '
+                f'active_high={self.stop_button_active_high}')
 
     @staticmethod
     def load_config(config_path: str) -> dict:
@@ -219,9 +257,37 @@ class WaypointNavigator(Node):
             else:
                 self.get_logger().error('START BUTTON DITOLAK: ' + message)
 
+    def start_command_callback(self, msg: Bool) -> None:
+        if not msg.data:
+            return
+        accepted, message = self.request_start()
+        if accepted:
+            self.get_logger().info('START COMMAND: ' + message)
+        else:
+            self.get_logger().error('START COMMAND DITOLAK: ' + message)
+
+    def stop_button_callback(self, msg: Bool) -> None:
+        active = bool(msg.data) == self.stop_button_active_high
+        if self.last_stop_button_active is None:
+            self.last_stop_button_active = active
+            return
+        rising_active = active and not self.last_stop_button_active
+        self.last_stop_button_active = active
+        now = time.monotonic()
+        if rising_active and now - self.last_stop_button_press >= self.stop_button_debounce:
+            self.last_stop_button_press = now
+            self.active = False
+            self.start_pending = False
+            self.reset_future = None
+            self.set_state('IDLE')
+            self.stop_motors()
+            self.get_logger().warning('STOP BUTTON: navigator dan motor STOP')
+
     def request_start(self) -> Tuple[bool, str]:
         if self.active or self.start_pending:
             return False, 'navigator sudah aktif atau sedang start'
+        if self.last_stop_button_active:
+            return False, 'tombol STOP sedang aktif'
         if self.pose is None:
             return False, '/odom belum tersedia'
         if self.avoidance_enabled and time.monotonic() - self.last_scan_time > 1.0:
@@ -246,7 +312,7 @@ class WaypointNavigator(Node):
             self.get_logger().error(f'Reset odometri gagal: {error}; STOP')
             self.start_pending = False
             self.reset_future = None
-            self.state = 'IDLE'
+            self.set_state('IDLE')
             self.stop_motors()
             return
         self.index = 0
@@ -265,7 +331,7 @@ class WaypointNavigator(Node):
         self.active = False
         self.start_pending = False
         self.reset_future = None
-        self.state = 'IDLE'
+        self.set_state('IDLE')
         self.stop_motors()
         response.success = True
         response.message = 'STOP waypoint navigator'
@@ -275,6 +341,49 @@ class WaypointNavigator(Node):
     def set_state(self, state: str) -> None:
         self.state = state
         self.state_started = time.monotonic()
+        if state == 'DONE':
+            self.set_light('red:blink_hw')
+        elif state == 'WAIT_AT_WAYPOINT':
+            self.set_light('yellow:blink_hw')
+        elif state in (
+                'TURN_TO_GOAL', 'DRIVE_TO_GOAL',
+                'AVOID_TURN', 'AVOID_FORWARD'):
+            self.set_light('green:blink_hw')
+        else:
+            self.set_light('red')
+
+    def set_light(self, command: str) -> None:
+        """Jadwalkan status tower digital untuk dipublikasikan oleh timer."""
+        self.desired_light_command = command
+
+    def update_light_tower(self) -> None:
+        """Tulis C/R/G/Y langsung sebagai VMX digital output."""
+        outputs = {
+            # command:             C      R      G      Y
+            'red':                 (True,  True,  False, False),
+            'green:blink_hw':      (False, False, True,  False),
+            'yellow:blink_hw':     (False, False, False, True),
+            'red:blink_hw':        (False, True,  False, False),
+            'off':                 (False, False, False, False),
+        }
+        values = outputs.get(self.desired_light_command, outputs['off'])
+        publishers = (
+            self.light_control_publisher,
+            self.light_red_publisher,
+            self.light_green_publisher,
+            self.light_yellow_publisher,
+        )
+        for publisher, value in zip(publishers, values):
+            msg = Bool()
+            msg.data = value
+            publisher.publish(msg)
+
+        if self.sent_light_command != self.desired_light_command:
+            self.get_logger().info(
+                f'LIGHT TOWER DIO: {self.desired_light_command} '
+                f'(C={int(values[0])}, R={int(values[1])}, '
+                f'G={int(values[2])}, Y={int(values[3])})')
+            self.sent_light_command = self.desired_light_command
 
     def publish_drive(self, forward: float, turn_left: float) -> None:
         msg = Twist()
@@ -303,6 +412,10 @@ class WaypointNavigator(Node):
             self.finish_pending_start()
             return
         if not self.active:
+            if self.state == 'DONE':
+                self.set_light('red:blink_hw')
+            else:
+                self.set_light('red')
             self.publish_drive(0.0, 0.0)
             return
         if self.pose is None or now - self.last_odom_time > 0.6:
@@ -315,9 +428,27 @@ class WaypointNavigator(Node):
             self.active = False
             self.stop_motors()
             return
+
+        if self.state == 'WAIT_AT_WAYPOINT':
+            self.stop_motors()
+            elapsed = now - self.state_started
+            if elapsed < self.waypoint_pause:
+                if now >= self.next_log_time:
+                    remaining = self.waypoint_pause - elapsed
+                    self.get_logger().info(
+                        f'TUNGGU DI WAYPOINT: {remaining:.1f} detik')
+                    self.next_log_time = now + 1.0
+                return
+            if self.index >= len(self.sequence):
+                self.active = False
+                self.set_state('DONE')
+                self.get_logger().info('SEMUA WAYPOINT SELESAI; STOP')
+                return
+            self.set_state('TURN_TO_GOAL')
+
         if self.index >= len(self.sequence):
             self.active = False
-            self.state = 'DONE'
+            self.set_state('DONE')
             self.stop_motors()
             self.get_logger().info('SEMUA WAYPOINT SELESAI; STOP')
             return
@@ -343,7 +474,18 @@ class WaypointNavigator(Node):
             self.get_logger().info(
                 f'WAYPOINT {name} TERCAPAI pada ({x:.2f}, {y:.2f})')
             self.index += 1
-            self.set_state('TURN_TO_GOAL')
+            if self.index >= len(self.sequence):
+                self.active = False
+                self.set_state('DONE')
+                self.get_logger().info(
+                    f'WAYPOINT TERAKHIR {name} / HOME TERCAPAI; '
+                    'SEMUA WAYPOINT SELESAI; STOP')
+            elif self.waypoint_pause > 0.0:
+                self.set_state('WAIT_AT_WAYPOINT')
+                self.get_logger().info(
+                    f'STOP {self.waypoint_pause:.1f} detik di waypoint {name}')
+            else:
+                self.set_state('TURN_TO_GOAL')
             return
 
         if self.state in ('TURN_TO_GOAL', 'DRIVE_TO_GOAL'):
