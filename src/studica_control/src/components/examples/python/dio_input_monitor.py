@@ -59,7 +59,7 @@ def parse_args():
     mode = parser.add_mutually_exclusive_group()
     mode.add_argument('--active-low', dest='active_low', action='store_true')
     mode.add_argument('--active-high', dest='active_low', action='store_false')
-    parser.set_defaults(active_low=False)
+    parser.set_defaults(active_low=True)
     args, _ = parser.parse_known_args()
     return args
 
