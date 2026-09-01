@@ -1,0 +1,32 @@
+# Pengujian terisolasi: start (0,0,0) menuju B (1,1).
+# Robot harus putar kiri sekitar 45 derajat, lalu maju dan STOP di B.
+coordinate_mode: local
+start_pose: {x: 0.00, y: 0.00, yaw_deg: 0.0}
+
+waypoints:
+  B: {x: 1.00, y: 1.00}
+
+sequence: [B]
+
+start_button:
+  enabled: true
+  topic: "/start_button/state"
+  active_high: false
+  debounce_ms: 250
+
+motion:
+  linear_speed: 0.15
+  minimum_linear_speed: 0.08
+  angular_speed: 0.50
+  heading_kp: 1.20
+  distance_kp: 0.50
+  max_heading_correction: 0.30
+  position_tolerance: 0.10
+  turn_tolerance_deg: 6.0
+  drive_heading_limit_deg: 25.0
+  turn_timeout: 4.0
+
+# Dinonaktifkan hanya untuk mengisolasi odometry dan heading pada pengujian.
+# Pastikan lintasan menuju B benar-benar kosong.
+obstacle_avoidance:
+  enabled: false

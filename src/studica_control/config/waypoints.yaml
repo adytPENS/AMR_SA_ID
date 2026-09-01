@@ -35,6 +35,7 @@ motion:
   position_tolerance: 0.12
   turn_tolerance_deg: 6.0
   drive_heading_limit_deg: 25.0
+  turn_timeout: 6.0
 
 obstacle_avoidance:
   enabled: true

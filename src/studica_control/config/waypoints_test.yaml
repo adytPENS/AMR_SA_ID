@@ -22,6 +22,7 @@ motion:
   position_tolerance: 0.05
   turn_tolerance_deg: 6.0
   drive_heading_limit_deg: 25.0
+  turn_timeout: 4.0
 
 # Dinonaktifkan untuk validasi waypoint pertama. Aktifkan setelah gerak lurus,
 # heading correction, dan emergency stop sudah teruji.

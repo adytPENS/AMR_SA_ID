@@ -95,6 +95,7 @@ class WaypointNavigator(Node):
             float(motion.get('turn_tolerance_deg', 6.0)))
         self.drive_heading_limit = math.radians(
             float(motion.get('drive_heading_limit_deg', 25.0)))
+        self.turn_timeout = float(motion.get('turn_timeout', 6.0))
 
         self.avoidance_enabled = bool(obstacle.get('enabled', True))
         self.stop_distance = float(obstacle.get('stop_distance', 0.55))
@@ -352,12 +353,20 @@ class WaypointNavigator(Node):
                 self.begin_avoidance()
                 return
 
-            if abs(heading_error) > self.drive_heading_limit:
+            if (abs(heading_error) > self.drive_heading_limit and
+                    self.state != 'TURN_TO_GOAL'):
                 self.set_state('TURN_TO_GOAL')
             elif self.state == 'TURN_TO_GOAL' and abs(heading_error) <= self.turn_tolerance:
                 self.set_state('DRIVE_TO_GOAL')
 
             if self.state == 'TURN_TO_GOAL':
+                if now - self.state_started > self.turn_timeout:
+                    self.get_logger().error(
+                        f'TURN timeout; heading_error='
+                        f'{math.degrees(heading_error):.1f}deg; STOP')
+                    self.active = False
+                    self.stop_motors()
+                    return
                 turn = math.copysign(self.angular_speed, heading_error)
                 self.publish_drive(0.0, turn)
             else:
