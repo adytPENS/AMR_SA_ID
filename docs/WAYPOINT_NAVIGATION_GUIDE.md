@@ -479,7 +479,7 @@ STOP. Tombol memicu:
 tekan START -> debounce -> validasi odom/LiDAR -> reset odom -> jalankan urutan
 ```
 
-Konfigurasi robot saat ini menggunakan DIO 8 dan tombol active-low:
+Konfigurasi robot saat ini menggunakan DIO 10 dan tombol active-low:
 
 ```yaml
 # config/titan_m1_test.yaml
@@ -487,7 +487,7 @@ dio:
   enabled: true
   sensors: ["start_button"]
   start_button:
-    pin: 8
+    pin: 10
     type: "input"
     interrupt_edge: "falling"
     debounce_ms: 250
