@@ -1,7 +1,7 @@
 # "map": koordinat A-D dan start_pose diisi dari peta juri. Program otomatis
 # mengubahnya menjadi koordinat lokal odometri. Gunakan "local" jika titik
 # sudah dihitung relatif terhadap start robot.
-coordinate_mode: map
+coordinate_mode: local
 
 # Pose robot ketika tombol start ditekan, dalam frame peta juri.
 # yaw_deg=0 berarti depan robot sejajar sumbu +X peta.
@@ -20,9 +20,9 @@ sequence: [A, B, C, D]
 # Aktifkan setelah tombol dipasang pada VMX DIO dan start_button diaktifkan
 # pada titan_m1_test.yaml. Manual start service tetap dapat digunakan.
 start_button:
-  enabled: false
+  enabled: true
   topic: "/start_button/state"
-  active_high: true
+  active_high: false
   debounce_ms: 250
 
 motion:

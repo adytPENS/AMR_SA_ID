@@ -479,6 +479,42 @@ STOP. Tombol memicu:
 tekan START -> debounce -> validasi odom/LiDAR -> reset odom -> jalankan urutan
 ```
 
-Aktifkan hanya setelah nomor pin dan wiring DIO diverifikasi. Jangan pernah
-menghubungkan 12 V ke input DIO VMX2. Tombol start bukan pengganti emergency
-stop fisik.
+Konfigurasi robot saat ini menggunakan DIO 15 dan tombol active-low:
+
+```yaml
+# config/titan_m1_test.yaml
+dio:
+  enabled: true
+  sensors: ["start_button"]
+  start_button:
+    pin: 15
+    type: "input"
+    interrupt_edge: "falling"
+    debounce_ms: 250
+```
+
+```yaml
+# config/waypoints.yaml
+start_button:
+  enabled: true
+  topic: "/start_button/state"
+  active_high: false
+  debounce_ms: 250
+```
+
+Active-low berarti kondisi normal menghasilkan `true/HIGH`, tombol ditekan
+menghasilkan `false/LOW`, dan interrupt terjadi pada falling edge. Uji tombol
+tanpa gerakan terlebih dahulu:
+
+```bash
+ros2 service call /titan0/titan_cmd studica_control/srv/SetData \
+  "{params: 'disable'}"
+ros2 topic echo /start_button/state
+```
+
+Output harus berubah dari `data: true` menjadi `data: false` ketika ditekan,
+lalu kembali `true` ketika dilepas. Jangan menjalankan mode waypoint sebelum
+hasil ini benar.
+
+Jangan pernah menghubungkan 12 V ke input DIO VMX2. Tombol start bukan
+pengganti emergency stop fisik.
