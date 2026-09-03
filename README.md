@@ -52,7 +52,7 @@ Pemetaan digital saat ini:
 
 ```text
 START (active-low)  DIO 10
-STOP  (active-high) DIO 11
+STOP  (active-low)  DIO 11
 Control/C           DIO 12
 Red                 DIO 13
 Green               DIO 14
@@ -66,6 +66,26 @@ stack dari satu terminal:
 cd ~/studica_ws
 ./scripts/start_full_waypoint.sh
 ```
+
+Gunakan satu file `src/studica_control/config/waypoints.yaml`. Pilih perilaku
+dengan flag berikut:
+
+```yaml
+obstacle_avoidance:
+  enabled: false  # tanpa LiDAR; lintasan harus kosong
+```
+
+Ubah menjadi `true` untuk memakai obstacle avoidance. Jalankan YDLIDAR lebih
+dahulu sampai topic `/scan` tersedia, kemudian gunakan perintah start yang
+sama:
+
+```yaml
+obstacle_avoidance:
+  enabled: true
+```
+
+Mode avoidance hanya memakai area LiDAR `-80°..+80°`; `0°` adalah depan,
+sudut positif adalah kiri, dan sudut negatif adalah kanan.
 
 Tunggu sampai muncul `SEMUA SIAP`, lalu tekan push START DIO 10. Robot tidak
 melakukan auto-start. Push STOP DIO 11 menghentikan navigator dan motor.

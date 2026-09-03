@@ -1,0 +1,27 @@
+# Ubah menjadi true hanya setelah HOME, waypoint, dan sequence diverifikasi.
+configured: true
+
+map_file: "/home/vmx/studica_ws/maps/Navigation.yaml"
+
+# Pose pusat robot pada posisi HOME dalam frame map.
+home: {x: 0.00, y: 0.00, yaw_deg: 0.0}
+
+# Koordinat contoh saja. Ganti dari lembar juri/map coordinate picker.
+waypoints:
+  A: {x: 0.00, y: 0.68, yaw_deg: 0.0}
+  B: {x: 0.00, y: 3.37, yaw_deg: 0.0}
+  C: {x: 1.29, y: 0.68, yaw_deg: 0.0}
+  S: {x: 0.00, y: 0.00, yaw_deg: 0.0}
+
+
+
+sequence: [A, B, C, S]
+waypoint_pause_seconds: 7.0
+
+# Pilihan: red_blink atau red_solid. Dokumen lomba memiliki dua keterangan
+# berbeda; default mengikuti bagian Light Tower Requirements.
+final_light: red_blink
+
+buttons:
+  start_active_high: false
+  stop_active_high: false

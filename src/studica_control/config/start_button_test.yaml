@@ -14,8 +14,8 @@ control_server:
       stop_button:
         pin: 11
         type: "input"
-        # Wiring STOP terukur active-high: tekan menghasilkan HIGH.
-        interrupt_edge: "rising"
+        # Active-low: tombol ditekan menghasilkan LOW.
+        interrupt_edge: "falling"
         debounce_ms: 250
 
     imu:

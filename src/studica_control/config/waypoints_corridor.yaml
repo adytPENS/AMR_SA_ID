@@ -1,0 +1,68 @@
+# Profil waypoint koridor tanpa Nav2. Sesuaikan P1/P2/... dengan celah map.
+coordinate_mode: local
+start_pose: {x: 0.00, y: 0.00, yaw_deg: 0.0}
+
+waypoints:
+  # Titik tugas: boleh dikonfirmasi LiDAR hanya ketika odometri sudah dekat.
+  A: {x: 0.00, y: 0.68, arrival: odometry_or_lidar}
+  B: {x: 0.00, y: 3.37, arrival: odometry_or_lidar}
+  C: {x: 1.29, y: 0.68, arrival: odometry_or_lidar}
+  # Tambahkan titik aman sesuai map, misalnya:
+  P1: {x: 1.28, y: 0.00, arrival: odometry}
+  P2: {x: 0.77, y: 0.68, arrival: odometry}
+  P3: {x: 1.29, y: 0.68, arrival: odometry}
+  P4: {x: 1.37, y: 3.4, arrival: odometry}
+  S: {x: 0.00, y: 0.00, arrival: odometry}
+
+sequence: [P1, P4, B, P4, P3, A, C, P1, S]
+
+start_button:
+  enabled: true
+  topic: /start_button/state
+  active_high: false
+  debounce_ms: 250
+stop_button:
+  enabled: true
+  topic: /stop_button/state
+  active_high: false
+  debounce_ms: 250
+
+motion:
+  linear_speed: 0.30
+  minimum_linear_speed: 0.10
+  angular_speed: 1.20
+  heading_kp: 1.20
+  distance_kp: 0.50
+  max_heading_correction: 0.30
+  position_tolerance: 0.12
+  approach_radius: 0.50
+  approach_speed: 0.10
+  lidar_arrival_radius: 0.35
+  lidar_arrival_distance: 0.30
+  turn_tolerance_deg: 8.0
+  drive_heading_limit_deg: 25.0
+  turn_timeout: 10.0
+  waypoint_pause_seconds: 5.2
+  transit_prefixes: [P]
+
+obstacle_avoidance:
+  enabled: false
+  front_half_angle_deg: 30.0
+  usable_half_angle_deg: 80.0
+  front_bins: 9
+  filter_alpha_closing: 0.65
+  filter_alpha_opening: 0.25
+  side_percentile: 25.0
+  stop_distance: 0.25
+  clear_distance: 0.40
+  avoid_angle_deg: 55.0
+  turn_timeout: 12.0
+  wall_distance: 0.35
+  wall_speed: 0.20
+  wall_kp: 1.50
+  wall_max_turn: 0.70
+  wall_search_turn: 0.30
+  leave_heading_deg: 25.0
+  progress_margin: 0.15
+  leave_clear_time: 0.60
+  wall_follow_timeout: 45.0

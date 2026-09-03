@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Monitor START active-low dan STOP active-high tanpa aktuator."""
+"""Monitor START dan STOP active-low tanpa aktuator."""
 
 import rclpy
 from rclpy.executors import ExternalShutdownException
@@ -19,14 +19,14 @@ class StartStopButtonMonitor(Node):
             Bool, '/stop_button/state',
             lambda msg: self.on_button('STOP', msg), 10)
         self.get_logger().info(
-            'Monitoring START=DIO10 active-low dan STOP=DIO11 active-high; '
+            'Monitoring START=DIO10 dan STOP=DIO11 active-low; '
             'motor nonaktif')
 
     def on_button(self, name: str, msg: Bool) -> None:
         raw = bool(msg.data)
         if raw == self.last_state[name]:
             return
-        pressed = (not raw) if name == 'START' else raw
+        pressed = not raw
         if pressed:
             self.press_count[name] += 1
         electrical = 'HIGH' if raw else 'LOW'

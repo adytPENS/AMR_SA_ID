@@ -221,24 +221,38 @@ The LiDAR monitors the forward sector. If an obstacle is detected closer than
 1. stops;
 2. compares left and right clearance;
 3. turns approximately 55 degrees toward the clearer side;
-4. drives approximately `0.60 m`;
-5. recalculates the direction to the active waypoint.
+4. follows the wall while controlling front and side clearance;
+5. leaves the wall after the waypoint direction stays clear and the robot has
+   made measurable progress toward the goal;
+6. resumes direct motion toward the active waypoint.
 
 The settings are stored in `waypoints.yaml`:
 
 ```yaml
 obstacle_avoidance:
   enabled: true
+  front_half_angle_deg: 30.0
+  usable_half_angle_deg: 80.0
   stop_distance: 0.55
   clear_distance: 0.75
   avoid_angle_deg: 55.0
-  avoid_step_distance: 0.60
-  timeout: 12.0
+  turn_timeout: 12.0
+  wall_distance: 0.45
+  wall_speed: 0.14
+  wall_kp: 1.50
+  wall_max_turn: 0.55
+  wall_search_turn: 0.25
+  leave_heading_deg: 25.0
+  progress_margin: 0.15
+  leave_clear_time: 0.60
+  wall_follow_timeout: 35.0
 ```
 
-This is reactive avoidance, not global route planning. It may fail in narrow
-corridors, U-shaped obstacles, or dense environments. An operator-accessible
-stop command remains mandatory.
+Wall following uses the verified `-80..+80` degree LiDAR area and ignores the
+rear wheel/body reflections. This remains reactive avoidance rather than a
+global planner. A U-shaped obstacle or blocked corridor may end in
+`wall_follow_timeout` and a safety stop. An operator-accessible stop button
+remains mandatory.
 
 If a fixed wall blocks the direct line between two competition points, add
 intermediate corridor points such as `AB1` and `AB2`:

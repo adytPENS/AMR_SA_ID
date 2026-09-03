@@ -49,6 +49,10 @@ class WaypointNavigator(Node):
             name.upper(): (float(value['x']), float(value['y']))
             for name, value in config['waypoints'].items()
         }
+        self.waypoint_options = {
+            name.upper(): dict(value)
+            for name, value in config['waypoints'].items()
+        }
         coordinate_mode = str(config.get('coordinate_mode', 'local')).lower()
         if coordinate_mode == 'map':
             start = config.get('start_pose', {})
@@ -98,15 +102,76 @@ class WaypointNavigator(Node):
         self.turn_timeout = float(motion.get('turn_timeout', 6.0))
         self.waypoint_pause = max(
             0.0, float(motion.get('waypoint_pause_seconds', 0.0)))
+        self.approach_radius = max(
+            self.position_tolerance,
+            float(motion.get('approach_radius', 0.50)))
+        self.approach_speed = max(
+            0.03, float(motion.get('approach_speed', 0.10)))
+        self.default_lidar_arrival_radius = max(
+            self.position_tolerance,
+            float(motion.get('lidar_arrival_radius', 0.35)))
+        self.default_lidar_arrival_distance = max(
+            0.10, float(motion.get('lidar_arrival_distance', 0.30)))
+        self.transit_prefixes = tuple(
+            str(item).strip().upper()
+            for item in motion.get('transit_prefixes', ['P'])
+            if str(item).strip())
 
         self.avoidance_enabled = bool(obstacle.get('enabled', True))
+        self.front_half_angle = math.radians(
+            float(obstacle.get('front_half_angle_deg', 30.0)))
+        self.usable_half_angle = math.radians(
+            float(obstacle.get('usable_half_angle_deg', 80.0)))
+        self.side_percentile = float(
+            obstacle.get('side_percentile', 25.0))
+        self.front_bins = int(obstacle.get('front_bins', 9))
+        self.filter_alpha_closing = float(
+            obstacle.get('filter_alpha_closing', 0.65))
+        self.filter_alpha_opening = float(
+            obstacle.get('filter_alpha_opening', 0.25))
+        if not 0.0 < self.front_half_angle < self.usable_half_angle <= math.pi:
+            raise ValueError(
+                'Sudut obstacle harus memenuhi 0 < front_half < '
+                'usable_half <= 180 derajat')
+        if not 0.0 <= self.side_percentile <= 100.0:
+            raise ValueError('side_percentile harus di antara 0 dan 100')
+        if self.front_bins < 3:
+            raise ValueError('front_bins minimal 3')
+        if not 0.0 < self.filter_alpha_closing <= 1.0:
+            raise ValueError('filter_alpha_closing harus > 0 dan <= 1')
+        if not 0.0 < self.filter_alpha_opening <= 1.0:
+            raise ValueError('filter_alpha_opening harus > 0 dan <= 1')
         self.stop_distance = float(obstacle.get('stop_distance', 0.55))
         self.clear_distance = float(obstacle.get('clear_distance', 0.75))
         self.avoid_angle = math.radians(
             float(obstacle.get('avoid_angle_deg', 55.0)))
-        self.avoid_step_distance = float(
-            obstacle.get('avoid_step_distance', 0.60))
-        self.avoid_timeout = float(obstacle.get('timeout', 12.0))
+        self.avoid_timeout = float(obstacle.get('turn_timeout', 12.0))
+        self.wall_distance = float(
+            obstacle.get('wall_distance', 0.45))
+        self.wall_speed = float(
+            obstacle.get('wall_speed', 0.14))
+        self.wall_kp = float(obstacle.get('wall_kp', 1.5))
+        self.wall_max_turn = float(
+            obstacle.get('wall_max_turn', 0.55))
+        self.wall_search_turn = float(
+            obstacle.get('wall_search_turn', 0.25))
+        self.wall_leave_heading = math.radians(
+            float(obstacle.get('leave_heading_deg', 25.0)))
+        self.wall_progress_margin = float(
+            obstacle.get('progress_margin', 0.15))
+        self.wall_leave_clear_time = float(
+            obstacle.get('leave_clear_time', 0.60))
+        self.wall_timeout = float(
+            obstacle.get('wall_follow_timeout', 35.0))
+        if not self.stop_distance < self.clear_distance:
+            raise ValueError('clear_distance harus lebih besar dari stop_distance')
+        if not 0.0 < self.wall_distance < self.clear_distance:
+            raise ValueError('wall_distance harus di antara 0 dan clear_distance')
+        if not 0.0 < self.wall_speed <= self.linear_speed:
+            raise ValueError('wall_speed harus > 0 dan <= linear_speed')
+        if not 0.0 < self.wall_leave_heading <= self.front_half_angle:
+            raise ValueError(
+                'leave_heading_deg harus > 0 dan <= front_half_angle_deg')
         button = config.get('start_button', {})
         self.button_enabled = bool(button.get('enabled', False))
         self.button_topic = str(
@@ -160,6 +225,7 @@ class WaypointNavigator(Node):
         self.last_odom_time = 0.0
         self.last_scan_time = 0.0
         self.front_clearance = math.inf
+        self.raw_front_clearance = math.inf
         self.left_clearance = math.inf
         self.right_clearance = math.inf
         self.active = False
@@ -168,14 +234,20 @@ class WaypointNavigator(Node):
         self.state_started = time.monotonic()
         self.avoid_direction = 1.0
         self.avoid_target_yaw = 0.0
-        self.avoid_start: Optional[Tuple[float, float]] = None
+        self.wall_side = -1.0
+        self.wall_hit_goal_distance = math.inf
+        self.wall_follow_started = 0.0
+        self.wall_leave_clear_since: Optional[float] = None
         self.next_log_time = 0.0
         self.last_button_active: Optional[bool] = None
         self.last_button_press = 0.0
         self.last_stop_button_active: Optional[bool] = None
+        self.last_stop_button_update = 0.0
         self.last_stop_button_press = 0.0
         self.reset_future = None
         self.start_pending = False
+        self.reset_request_time = 0.0
+        self.reset_response_received = False
         self.desired_light_command = 'red'
         self.sent_light_command: Optional[str] = None
         # Tegaskan kondisi awal setelah seluruh client/state siap dibuat.
@@ -232,13 +304,80 @@ class WaypointNavigator(Node):
                     values.append(float(distance))
         return min(values) if values else math.inf
 
+    @staticmethod
+    def sector_percentile(
+            msg: LaserScan, start: float, end: float,
+            percentile: float) -> float:
+        values: List[float] = []
+        for index, distance in enumerate(msg.ranges):
+            angle = normalize_angle(msg.angle_min + index * msg.angle_increment)
+            if start <= angle <= end and math.isfinite(distance):
+                if msg.range_min <= distance <= msg.range_max:
+                    values.append(float(distance))
+        if not values:
+            return math.inf
+        values.sort()
+        rank = int(round((percentile / 100.0) * (len(values) - 1)))
+        return values[rank]
+
+    @staticmethod
+    def sector_binned_near_average(
+            msg: LaserScan, start: float, end: float,
+            bin_count: int) -> float:
+        """Jarak depan robust dari beberapa sinar, bukan satu nilai minimum.
+
+        Sektor dibagi menjadi beberapa kelompok sudut. Pada setiap kelompok,
+        satu nilai terendah dan tertinggi dibuang jika sampelnya cukup, lalu
+        sisanya dirata-rata. Kelompok dengan rata-rata terdekat dipakai agar
+        obstacle sempit tetap terlihat tanpa mudah dipicu satu spike noise.
+        """
+        bins: List[List[float]] = [[] for _ in range(bin_count)]
+        width = end - start
+        for index, distance in enumerate(msg.ranges):
+            angle = normalize_angle(msg.angle_min + index * msg.angle_increment)
+            if start <= angle <= end and math.isfinite(distance):
+                if msg.range_min <= distance <= msg.range_max:
+                    position = (angle - start) / width
+                    bin_index = min(bin_count - 1, int(position * bin_count))
+                    bins[bin_index].append(float(distance))
+
+        averages: List[float] = []
+        for values in bins:
+            if len(values) < 2:
+                continue
+            values.sort()
+            if len(values) >= 5:
+                values = values[1:-1]
+            averages.append(sum(values) / len(values))
+        return min(averages) if averages else math.inf
+
+    def low_pass_distance(self, previous: float, current: float) -> float:
+        if not math.isfinite(current):
+            return previous
+        if not math.isfinite(previous):
+            return current
+        alpha = (
+            self.filter_alpha_closing
+            if current < previous else self.filter_alpha_opening)
+        return previous + alpha * (current - previous)
+
     def scan_callback(self, msg: LaserScan) -> None:
-        self.front_clearance = self.sector_min(
-            msg, math.radians(-30), math.radians(30))
-        self.left_clearance = self.sector_min(
-            msg, math.radians(30), math.radians(100))
-        self.right_clearance = self.sector_min(
-            msg, math.radians(-100), math.radians(-30))
+        raw_front = self.sector_binned_near_average(
+            msg, -self.front_half_angle, self.front_half_angle,
+            self.front_bins)
+        raw_left = self.sector_percentile(
+            msg, self.front_half_angle, self.usable_half_angle,
+            self.side_percentile)
+        raw_right = self.sector_percentile(
+            msg, -self.usable_half_angle, -self.front_half_angle,
+            self.side_percentile)
+        self.raw_front_clearance = raw_front
+        self.front_clearance = self.low_pass_distance(
+            self.front_clearance, raw_front)
+        self.left_clearance = self.low_pass_distance(
+            self.left_clearance, raw_left)
+        self.right_clearance = self.low_pass_distance(
+            self.right_clearance, raw_right)
         self.last_scan_time = time.monotonic()
 
     def button_callback(self, msg: Bool) -> None:
@@ -268,12 +407,17 @@ class WaypointNavigator(Node):
 
     def stop_button_callback(self, msg: Bool) -> None:
         active = bool(msg.data) == self.stop_button_active_high
+        now = time.monotonic()
         if self.last_stop_button_active is None:
             self.last_stop_button_active = active
+            self.last_stop_button_update = now
             return
         rising_active = active and not self.last_stop_button_active
+        falling_active = not active and self.last_stop_button_active
         self.last_stop_button_active = active
-        now = time.monotonic()
+        self.last_stop_button_update = now
+        if falling_active:
+            self.get_logger().info('STOP BUTTON RELEASED: START diizinkan kembali')
         if rising_active and now - self.last_stop_button_press >= self.stop_button_debounce:
             self.last_stop_button_press = now
             self.active = False
@@ -286,8 +430,14 @@ class WaypointNavigator(Node):
     def request_start(self) -> Tuple[bool, str]:
         if self.active or self.start_pending:
             return False, 'navigator sudah aktif atau sedang start'
-        if self.last_stop_button_active:
+        stop_state_is_fresh = (
+            time.monotonic() - self.last_stop_button_update <= 0.50)
+        if self.last_stop_button_active and stop_state_is_fresh:
             return False, 'tombol STOP sedang aktif'
+        if self.last_stop_button_active and not stop_state_is_fresh:
+            self.get_logger().warning(
+                'Status STOP aktif sudah stale; abaikan event lama')
+            self.last_stop_button_active = False
         if self.pose is None:
             return False, '/odom belum tersedia'
         if self.avoidance_enabled and time.monotonic() - self.last_scan_time > 1.0:
@@ -295,10 +445,12 @@ class WaypointNavigator(Node):
         if not self.odom_reset_client.service_is_ready():
             return False, '/wheel_odometry/reset belum tersedia'
         self.stop_motors()
+        self.reset_request_time = time.monotonic()
+        self.reset_response_received = False
         self.reset_future = self.odom_reset_client.call_async(Empty.Request())
         self.start_pending = True
         self.state = 'RESETTING_ODOM'
-        return True, f'reset odometri, lalu mulai {self.sequence}'
+        return True, f'zero yaw dan reset odometri, lalu mulai {self.sequence}'
 
     def finish_pending_start(self) -> None:
         if not self.start_pending or self.reset_future is None:
@@ -306,21 +458,47 @@ class WaypointNavigator(Node):
         if not self.reset_future.done():
             self.stop_motors()
             return
-        try:
-            self.reset_future.result()
-        except Exception as error:
-            self.get_logger().error(f'Reset odometri gagal: {error}; STOP')
-            self.start_pending = False
-            self.reset_future = None
-            self.set_state('IDLE')
+        if not self.reset_response_received:
+            try:
+                self.reset_future.result()
+            except Exception as error:
+                self.get_logger().error(f'Reset odometri gagal: {error}; STOP')
+                self.start_pending = False
+                self.reset_future = None
+                self.set_state('IDLE')
+                self.stop_motors()
+                return
+            self.reset_response_received = True
+            self.get_logger().info(
+                'Zero yaw diterima; menunggu publikasi /odom nol terbaru')
+
+        # Jangan bergerak memakai pose lama yang mungkin masih tersimpan tepat
+        # sebelum service reset dijalankan. Tunggu satu publikasi /odom baru dan
+        # pastikan pose awal memang dekat (0, 0, 0).
+        pose_is_zero = (
+            self.pose is not None
+            and abs(self.pose[0]) <= 0.05
+            and abs(self.pose[1]) <= 0.05
+            and abs(self.pose[2]) <= math.radians(5.0)
+        )
+        if self.last_odom_time <= self.reset_request_time or not pose_is_zero:
             self.stop_motors()
+            if time.monotonic() - self.reset_request_time > 2.0:
+                self.get_logger().error(
+                    'Odometri nol tidak terkonfirmasi setelah START; STOP')
+                self.start_pending = False
+                self.reset_future = None
+                self.reset_response_received = False
+                self.set_state('IDLE')
             return
         self.index = 0
         self.active = True
         self.start_pending = False
         self.reset_future = None
+        self.reset_response_received = False
         self.set_state('TURN_TO_GOAL')
-        self.get_logger().info(f'RUN: urutan {self.sequence}')
+        self.get_logger().info(
+            f'ZERO YAW TERKONFIRMASI; RUN: urutan {self.sequence}')
 
     def start_callback(self, _request, response):
         response.success, response.message = self.request_start()
@@ -347,7 +525,7 @@ class WaypointNavigator(Node):
             self.set_light('yellow:blink_hw')
         elif state in (
                 'TURN_TO_GOAL', 'DRIVE_TO_GOAL',
-                'AVOID_TURN', 'AVOID_FORWARD'):
+                'AVOID_TURN', 'WALL_FOLLOW'):
             self.set_light('green:blink_hw')
         else:
             self.set_light('red')
@@ -395,9 +573,15 @@ class WaypointNavigator(Node):
         for _ in range(3):
             self.publish_drive(0.0, 0.0)
 
-    def begin_avoidance(self) -> None:
+    def begin_avoidance(self, goal_distance: float) -> None:
         self.avoid_direction = (
             1.0 if self.left_clearance >= self.right_clearance else -1.0)
+        # Jika berbelok ke kiri, obstacle/dinding akan berada di kanan,
+        # demikian pula sebaliknya.
+        self.wall_side = -self.avoid_direction
+        self.wall_hit_goal_distance = goal_distance
+        self.wall_follow_started = time.monotonic()
+        self.wall_leave_clear_since = None
         assert self.pose is not None
         self.avoid_target_yaw = normalize_angle(
             self.pose[2] + self.avoid_direction * self.avoid_angle)
@@ -456,6 +640,7 @@ class WaypointNavigator(Node):
         x, y, yaw = self.pose
         name = self.sequence[self.index]
         goal_x, goal_y = self.waypoints[name]
+        goal_options = self.waypoint_options.get(name, {})
         dx = goal_x - x
         dy = goal_y - y
         distance = math.hypot(dx, dy)
@@ -466,13 +651,31 @@ class WaypointNavigator(Node):
             self.get_logger().info(
                 f'{self.state} -> {name}: pose=({x:.2f},{y:.2f},'
                 f'{math.degrees(yaw):.1f}deg), jarak={distance:.2f}m, '
-                f'front={self.front_clearance:.2f}m')
+                f'front={self.front_clearance:.2f}m '
+                f'(raw={self.raw_front_clearance:.2f}m), '
+                f'left={self.left_clearance:.2f}m, '
+                f'right={self.right_clearance:.2f}m')
             self.next_log_time = now + 1.0
 
-        if distance <= self.position_tolerance:
+        arrival_mode = str(
+            goal_options.get('arrival', 'odometry')).strip().lower()
+        lidar_arrival_radius = float(goal_options.get(
+            'lidar_arrival_radius', self.default_lidar_arrival_radius))
+        lidar_arrival_distance = float(goal_options.get(
+            'lidar_arrival_distance', self.default_lidar_arrival_distance))
+        arrived_by_odom = distance <= self.position_tolerance
+        arrived_by_lidar = (
+            arrival_mode == 'odometry_or_lidar' and
+            distance <= lidar_arrival_radius and
+            self.front_clearance <= lidar_arrival_distance)
+
+        if arrived_by_odom or arrived_by_lidar:
             self.stop_motors()
+            arrival_source = 'LiDAR+odometri dekat' if arrived_by_lidar else 'odometri'
             self.get_logger().info(
-                f'WAYPOINT {name} TERCAPAI pada ({x:.2f}, {y:.2f})')
+                f'WAYPOINT {name} TERCAPAI ({arrival_source}) pada '
+                f'({x:.2f}, {y:.2f}); sisa={distance:.2f}m, '
+                f'front={self.front_clearance:.2f}m')
             self.index += 1
             if self.index >= len(self.sequence):
                 self.active = False
@@ -480,19 +683,23 @@ class WaypointNavigator(Node):
                 self.get_logger().info(
                     f'WAYPOINT TERAKHIR {name} / HOME TERCAPAI; '
                     'SEMUA WAYPOINT SELESAI; STOP')
-            elif self.waypoint_pause > 0.0:
+            elif (self.waypoint_pause > 0.0 and
+                  not name.startswith(self.transit_prefixes)):
                 self.set_state('WAIT_AT_WAYPOINT')
                 self.get_logger().info(
                     f'STOP {self.waypoint_pause:.1f} detik di waypoint {name}')
             else:
                 self.set_state('TURN_TO_GOAL')
+                self.get_logger().info(
+                    f'TRANSIT {name}: tanpa jeda, lanjut ke '
+                    f'{self.sequence[self.index]}')
             return
 
         if self.state in ('TURN_TO_GOAL', 'DRIVE_TO_GOAL'):
             if (self.avoidance_enabled and
                     self.front_clearance < self.stop_distance):
                 self.stop_motors()
-                self.begin_avoidance()
+                self.begin_avoidance(distance)
                 return
 
             if (abs(heading_error) > self.drive_heading_limit and
@@ -516,6 +723,8 @@ class WaypointNavigator(Node):
                     self.distance_kp * distance,
                     self.minimum_linear_speed,
                     self.linear_speed)
+                if distance <= self.approach_radius:
+                    forward = min(forward, self.approach_speed)
                 turn = clamp(
                     self.heading_kp * heading_error,
                     -self.max_heading_correction,
@@ -531,35 +740,67 @@ class WaypointNavigator(Node):
                 return
             avoid_error = normalize_angle(self.avoid_target_yaw - yaw)
             if abs(avoid_error) <= self.turn_tolerance:
-                self.avoid_start = (x, y)
-                self.set_state('AVOID_FORWARD')
+                self.set_state('WALL_FOLLOW')
                 self.stop_motors()
+                wall = 'kiri' if self.wall_side > 0.0 else 'kanan'
+                self.get_logger().info(
+                    f'Mulai mengikuti dinding di sisi {wall}; '
+                    f'target jarak={self.wall_distance:.2f} m')
             else:
                 self.publish_drive(
                     0.0, math.copysign(self.angular_speed, avoid_error))
             return
 
-        if self.state == 'AVOID_FORWARD':
-            assert self.avoid_start is not None
-            traveled = math.hypot(
-                x - self.avoid_start[0], y - self.avoid_start[1])
-            if now - self.state_started > self.avoid_timeout:
-                self.get_logger().error('Avoidance forward timeout; STOP')
+        if self.state == 'WALL_FOLLOW':
+            if now - self.wall_follow_started > self.wall_timeout:
+                self.get_logger().error('Wall-follow timeout; STOP')
                 self.active = False
                 self.stop_motors()
-            elif self.front_clearance < self.stop_distance:
-                self.stop_motors()
-                self.begin_avoidance()
-            elif traveled >= self.avoid_step_distance:
-                self.stop_motors()
-                self.set_state('TURN_TO_GOAL')
+                return
+
+            progress = self.wall_hit_goal_distance - distance
+            can_leave_wall = (
+                self.front_clearance >= self.clear_distance and
+                abs(heading_error) <= self.wall_leave_heading and
+                progress >= self.wall_progress_margin)
+            if can_leave_wall:
+                if self.wall_leave_clear_since is None:
+                    self.wall_leave_clear_since = now
+                elif now - self.wall_leave_clear_since >= self.wall_leave_clear_time:
+                    self.stop_motors()
+                    self.set_state('TURN_TO_GOAL')
+                    self.get_logger().info(
+                        f'Jalur ke {name} terbuka; keluar wall-follow '
+                        f'(progress={progress:.2f} m)')
+                    return
             else:
-                avoid_error = normalize_angle(self.avoid_target_yaw - yaw)
-                turn = clamp(
-                    self.heading_kp * avoid_error,
-                    -self.max_heading_correction,
-                    self.max_heading_correction)
-                self.publish_drive(self.minimum_linear_speed, turn)
+                self.wall_leave_clear_since = None
+
+            # Ketika dinding kembali menutup bagian depan, putar menjauhi
+            # sisi dinding tanpa meninggalkan mode wall-follow.
+            if self.front_clearance < self.stop_distance:
+                self.stop_motors()
+                turn_away = -self.wall_side * self.angular_speed
+                self.publish_drive(0.0, turn_away)
+                return
+
+            side_distance = (
+                self.left_clearance if self.wall_side > 0.0
+                else self.right_clearance)
+            if math.isfinite(side_distance):
+                wall_error = self.wall_distance - side_distance
+                turn = -self.wall_side * self.wall_kp * wall_error
+            else:
+                # Dinding hilang dari sektor samping: cari perlahan ke sisi
+                # dinding sampai tepi/ujung koridor ditemukan.
+                turn = self.wall_side * self.wall_search_turn
+            turn = clamp(turn, -self.wall_max_turn, self.wall_max_turn)
+            forward = (
+                self.minimum_linear_speed
+                if self.front_clearance < self.clear_distance
+                else self.wall_speed)
+            self.publish_drive(forward, turn)
+            return
 
 
 def parse_args():

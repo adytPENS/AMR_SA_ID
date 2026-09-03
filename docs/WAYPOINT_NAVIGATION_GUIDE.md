@@ -350,8 +350,10 @@ obstacle depan < stop_distance
    -> STOP
    -> bandingkan ruang kiri dan kanan
    -> putar ke sisi lebih lapang
-   -> maju avoid_step_distance
-   -> hitung ulang arah waypoint
+   -> ikuti dinding pada jarak wall_distance
+   -> jaga jarak depan dan samping selama melewati koridor
+   -> jika arah waypoint terbuka dan robot sudah membuat progress
+   -> keluar dari wall-follow dan kembali menuju waypoint
 ```
 
 Contoh parameter:
@@ -359,15 +361,27 @@ Contoh parameter:
 ```yaml
 obstacle_avoidance:
   enabled: true
+  front_half_angle_deg: 30.0
+  usable_half_angle_deg: 80.0
   stop_distance: 0.55
   clear_distance: 0.75
   avoid_angle_deg: 55.0
-  avoid_step_distance: 0.60
-  timeout: 12.0
+  turn_timeout: 12.0
+  wall_distance: 0.45
+  wall_speed: 0.14
+  wall_kp: 1.50
+  wall_max_turn: 0.55
+  wall_search_turn: 0.25
+  leave_heading_deg: 25.0
+  progress_margin: 0.15
+  leave_clear_time: 0.60
+  wall_follow_timeout: 35.0
 ```
 
-Ini adalah avoidance reaktif, bukan global planner. Untuk dinding tetap atau
-lorong berbelok, tambahkan waypoint perantara pada jalur yang aman.
+Wall-follow menggunakan area LiDAR `-80..+80` derajat dan mengabaikan pantulan
+roda/bodi di belakang. Ini tetap avoidance reaktif, bukan global planner.
+Obstacle berbentuk U atau lorong tanpa jalan keluar dapat berakhir dengan
+`wall_follow_timeout` dan safety STOP. Tombol STOP harus selalu dapat dijangkau.
 
 ## 9. Monitoring
 

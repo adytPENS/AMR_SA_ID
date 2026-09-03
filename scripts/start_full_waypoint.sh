@@ -7,8 +7,15 @@ PROJECT_ROOT="$(cd -- "$SCRIPT_DIR/.." && pwd)"
 HARDWARE_EXEC="$PROJECT_ROOT/install/studica_control/lib/studica_control/manual_composition"
 HARDWARE_CONFIG="$PROJECT_ROOT/src/studica_control/config/titan_m1_test.yaml"
 WAYPOINT_CONFIG="${1:-$PROJECT_ROOT/src/studica_control/config/waypoints.yaml}"
+YDLIDAR_ROOT="/home/vmx/ydlidar_ros2_ws"
+YDLIDAR_SETUP="$YDLIDAR_ROOT/install/setup.bash"
+# Gunakan profil yang sudah terbukti menerbitkan /scan pada pengujian unit ini.
+YDLIDAR_PARAMS="$YDLIDAR_ROOT/src/ydlidar_ros2_driver/params/Tmini.yaml"
 
 source /opt/ros/humble/setup.bash
+if [[ -f "$YDLIDAR_SETUP" ]]; then
+  source "$YDLIDAR_SETUP"
+fi
 source "$PROJECT_ROOT/install/setup.bash"
 export RMW_IMPLEMENTATION=rmw_cyclonedds_cpp
 set -u
@@ -21,10 +28,54 @@ cleanup() {
   timeout 2 ros2 service call /titan0/titan_cmd \
     studica_control/srv/SetData "{params: 'disable'}" \
     >/dev/null 2>&1 || true
-  kill "${MODE_PID:-}" "${HARDWARE_PID:-}" 2>/dev/null || true
-  wait "${MODE_PID:-}" "${HARDWARE_PID:-}" 2>/dev/null || true
+  kill "${MODE_PID:-}" "${LIDAR_PID:-}" "${HARDWARE_PID:-}" \
+    2>/dev/null || true
+  pkill -TERM -f 'ydlidar_ros2_driver_node' 2>/dev/null || true
+  pkill -TERM -f 'static_transform_publisher.*laser_frame' 2>/dev/null || true
+  wait "${MODE_PID:-}" "${LIDAR_PID:-}" "${HARDWARE_PID:-}" \
+    2>/dev/null || true
 }
 trap cleanup EXIT INT TERM
+
+AVOIDANCE_ENABLED="$(python3 - "$WAYPOINT_CONFIG" <<'PY'
+import sys
+import yaml
+
+with open(sys.argv[1], encoding='utf-8') as stream:
+    config = yaml.safe_load(stream) or {}
+print('true' if config.get('obstacle_avoidance', {}).get('enabled', True)
+      else 'false')
+PY
+)"
+
+if [[ "$AVOIDANCE_ENABLED" == "true" ]]; then
+  if [[ ! -f "$YDLIDAR_SETUP" || ! -f "$YDLIDAR_PARAMS" ]]; then
+    echo "ERROR: obstacle avoidance aktif, tetapi instalasi/config YDLIDAR tidak ditemukan." >&2
+    echo "Periksa: $YDLIDAR_SETUP" >&2
+    echo "Periksa: $YDLIDAR_PARAMS" >&2
+    exit 1
+  fi
+
+  echo "Menjalankan YDLIDAR untuk obstacle avoidance..."
+  ros2 launch ydlidar_ros2_driver ydlidar_launch.py \
+    params_file:="$YDLIDAR_PARAMS" &
+  LIDAR_PID=$!
+
+  echo "Menunggu data /scan dari LiDAR (maksimal 45 detik)..."
+  # Berikan tipe pesan secara eksplisit agar subscriber dapat dibuat sebelum
+  # publisher /scan selesai terdaftar pada ROS discovery. --no-daemon juga
+  # mencegah daftar topic lama dari daemon menyebabkan hasil pemeriksaan keliru.
+  if ! timeout 45 ros2 topic echo \
+      --no-daemon --spin-time 2 --qos-profile sensor_data --once \
+      /scan sensor_msgs/msg/LaserScan >/dev/null 2>&1; then
+    echo "ERROR: LiDAR tidak mengirim data /scan dalam 45 detik." >&2
+    echo "Periksa daya, kabel USB/serial, dan port YDLIDAR." >&2
+    exit 1
+  fi
+  echo "LiDAR siap: /scan tersedia."
+else
+  echo "Obstacle avoidance nonaktif; driver LiDAR tidak dijalankan."
+fi
 
 echo "Pastikan robot sudah berada di S/home dan menghadap arah start."
 echo "Menjalankan hardware, IMU, Titan, dan output lampu..."
@@ -60,6 +111,22 @@ echo "Menunggu odometri, drive controller, dan navigator selesai dibuat (20 deti
 sleep 20
 if ! kill -0 "$MODE_PID" 2>/dev/null; then
   echo "ERROR: mode waypoint berhenti sebelum navigator siap." >&2
+  exit 1
+fi
+
+# start_waypoint_mode adalah proses pembungkus sehingga masih dapat hidup
+# beberapa saat walaupun waypoint_navigator di dalamnya gagal. Pastikan
+# service navigator benar-benar terdaftar sebelum menampilkan SEMUA SIAP.
+NAVIGATOR_READY=false
+for _ in {1..10}; do
+  if ros2 service list 2>/dev/null | grep -Fxq /waypoint_navigator/start; then
+    NAVIGATOR_READY=true
+    break
+  fi
+  sleep 1
+done
+if [[ "$NAVIGATOR_READY" != "true" ]]; then
+  echo "ERROR: /waypoint_navigator/start tidak tersedia; navigator gagal dibuat." >&2
   exit 1
 fi
 

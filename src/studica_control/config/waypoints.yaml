@@ -15,11 +15,10 @@ start_pose: {x: 0.00, y: 0.00, yaw_deg: 0.0}
 # Contoh lintasan empat titik berbentuk persegi, dalam meter. Titik D kembali
 # ke pose start. Ganti koordinat ini dengan hasil pengukuran lintasan aktual.
 waypoints:
-  A: {x: 3.00, y: 1.50}
-  B: {x: 2.00, y: 0.50}
-  C: {x: 0.50, y: 1.00}
-  D: {x: 2.00, y: 1.50}
-  S: {x: 0.00, y: 0.00}  # Titik start, opsional
+  A: {x: 0.00, y: 0.68}
+  B: {x: 0.00, y: 3.37}
+  C: {x: 1.29, y: 0.68}
+  S: {x: 0.00, y: 0.00}  # HOME
 
 # Robot menyelesaikan satu titik sebelum otomatis menuju titik berikutnya.
 # Untuk lebih dari empat titik, misalnya tambahkan:
@@ -27,10 +26,9 @@ waypoints:
 # lalu ubah sequence menjadi [A, B, C, D, E].
 # Urutan juga dapat dioverride saat dijalankan: --sequence A,B,D,C.
 sequence:
-  - C
-  - B
-  - D
   - A
+  - B
+  - C
   - S
 
 # Aktifkan setelah tombol dipasang pada VMX DIO dan start_button diaktifkan
@@ -44,7 +42,7 @@ start_button:
 stop_button:
   enabled: true
   topic: "/stop_button/state"
-  active_high: true
+  active_high: false
   debounce_ms: 250
 
 motion:
@@ -57,21 +55,58 @@ motion:
   distance_kp: 0.50
   max_heading_correction: 0.30
   position_tolerance: 0.12
+  # Perlambat saat 50 cm terakhir. Konfirmasi LiDAR hanya berlaku jika
+  # waypoint memakai arrival: odometry_or_lidar dan sisa odom <= 35 cm.
+  approach_radius: 0.50
+  approach_speed: 0.10
+  lidar_arrival_radius: 0.35
+  lidar_arrival_distance: 0.30
   turn_tolerance_deg: 8.0
   drive_heading_limit_deg: 25.0
   # C -> A membutuhkan putaran kanan sekitar 150 derajat. Pengujian 7 detik
   # berhenti saat heading error tinggal 13 derajat, jadi beri margin aman.
   turn_timeout: 10.0
-  # Setelah mencapai setiap titik, motor STOP selama waktu ini sebelum lanjut.
-  waypoint_pause_seconds: 7.0
+  # Titik tugas A/B/C/D berhenti minimum 5 detik. Nama yang diawali P adalah
+  # titik transit dan langsung dilanjutkan tanpa jeda/lampu kuning.
+  waypoint_pause_seconds: 5.2
+  transit_prefixes: [P]
 
-# Pengujian START -> B berhasil dengan avoidance nonaktif. Pertahankan false
-# saat validasi lintasan empat titik di area kosong. Aktifkan kembali hanya
-# setelah data /scan sudah tervalidasi dan lintasan dasar lulus pengujian.
+# Obstacle avoidance aktif dan memerlukan topic /scan dari YDLIDAR.
 obstacle_avoidance:
-  enabled: false
-  stop_distance: 0.55
-  clear_distance: 0.75
+  enabled: true
+
+  # Area kerja tervalidasi: roda/bodi memantul di luar -80..+80 derajat.
+  # Depan=0, kiri positif, kanan negatif.
+  front_half_angle_deg: 30.0
+  usable_half_angle_deg: 80.0
+  # Sektor depan -30..+30 derajat dibagi menjadi 9 kelompok. Tiap kelompok
+  # merata-ratakan beberapa sinar setelah membuang pencilan, sehingga satu
+  # titik noise tidak langsung dianggap obstacle.
+  front_bins: 9
+  # Low-pass asimetris: cepat merespons obstacle yang mendekat, lebih halus
+  # ketika jarak kembali terbuka.
+  filter_alpha_closing: 0.65
+  filter_alpha_opening: 0.25
+  # Pembacaan samping memakai persentil agar satu pantulan roda tidak
+  # menentukan pilihan arah belok dan jarak trace dinding.
+  side_percentile: 25.0
+  # Mulai menghindar jika obstacle depan lebih dekat dari 25 cm.
+  stop_distance: 0.25
+  # Anggap jalur depan bebas kembali setelah jarak mencapai 40 cm.
+  clear_distance: 0.40
+  # Belok awal ke sisi yang lebih kosong, lalu ikuti dinding di sisi lawan.
   avoid_angle_deg: 55.0
-  avoid_step_distance: 0.60
-  timeout: 12.0
+  turn_timeout: 12.0
+  # Wall-follow untuk koridor dinamis.
+  # Jarak target robot saat mengikuti dinding: 30 cm.
+  wall_distance: 0.30
+  wall_speed: 0.2
+  wall_kp: 1.50
+  wall_max_turn: 0.55
+  wall_search_turn: 0.25
+  # Kembali mengejar waypoint jika arahnya terbuka, kondisi stabil 0,6 detik,
+  # dan robot sudah lebih dekat minimal 0,15 m dibanding titik tabrak awal.
+  leave_heading_deg: 25.0
+  progress_margin: 0.15
+  leave_clear_time: 0.60
+  wall_follow_timeout: 35.0
