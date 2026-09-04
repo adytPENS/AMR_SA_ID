@@ -57,4 +57,5 @@ Servo mempunyai loop posisi internal dan tidak memerlukan PID eksternal biasa.
 - `config/waypoints_corridor.yaml`: waypoint dengan titik transit P.
 - `titan_keyboard_teleop.py`: keyboard base dan OMS.
 - `scripts/start_full_waypoint.sh`: startup waypoint satu terminal.
+- `scripts/start_full_keyboard.sh`: keyboard base dan OMS satu terminal.
 - `scripts/stop_full_waypoint.sh`: emergency shutdown kedua Titan dan stack.

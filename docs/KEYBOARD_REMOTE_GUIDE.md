@@ -13,6 +13,17 @@ Keyboard I/K -> /titan1/m_2/cmd -> naik/turun gripper
 Keyboard J/L -> /titan1/m_3/cmd -> rotasi gripper CCW/CW
 ```
 
+Cara termudah adalah launcher satu terminal:
+
+```bash
+cd /home/vmx/studica_ws
+./scripts/start_full_keyboard.sh
+```
+
+Launcher menyalakan kedua Titan, encoder base, drive controller, dan keyboard;
+ketika Q/Ctrl+C digunakan, kedua Titan dinonaktifkan. Bagian tiga terminal di
+bawah digunakan untuk diagnosis jika launcher satu terminal gagal.
+
 Gunakan tiga terminal. Untuk pengujian pertama, angkat robot dengan penyangga
 yang kuat atau kosongkan area lantai. Tutup semua program motor lama agar tidak
 ada dua node yang mengirim perintah gerak bersamaan.
