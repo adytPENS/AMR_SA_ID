@@ -59,13 +59,29 @@ def main() -> None:
     tk.Label(root, textvariable=status, font=('Sans', 12, 'bold')).pack(pady=5)
     point_number = 0
 
-    def clicked(event) -> None:
-        nonlocal point_number
+    def event_to_world(event):
+        """Ubah posisi cursor canvas menjadi koordinat dunia map."""
         ix, iy = event.x - left, event.y - top
         if not (0 <= ix < shown.width and 0 <= iy < shown.height):
-            return
+            return None
         x = origin_x + (ix / scale) * resolution
         y = origin_y + ((shown.height - iy) / scale) * resolution
+        return x, y
+
+    def moved(event) -> None:
+        coordinate = event_to_world(event)
+        if coordinate is None:
+            status.set('Arahkan cursor ke dalam peta')
+            return
+        x, y = coordinate
+        status.set(f'Cursor: x={x:.3f}, y={y:.3f} m — klik untuk menandai')
+
+    def clicked(event) -> None:
+        nonlocal point_number
+        coordinate = event_to_world(event)
+        if coordinate is None:
+            return
+        x, y = coordinate
         point_number += 1
         label = f'P{point_number}: ({x:.2f}, {y:.2f})'
         canvas.create_oval(event.x - 5, event.y - 5, event.x + 5, event.y + 5,
@@ -75,6 +91,7 @@ def main() -> None:
         status.set(label)
         print(f'P{point_number}: x={x:.3f}, y={y:.3f}', flush=True)
 
+    canvas.bind('<Motion>', moved)
     canvas.bind('<Button-1>', clicked)
     print(f'Batas X: {origin_x:.2f} .. {max_x:.2f}')
     print(f'Batas Y: {origin_y:.2f} .. {max_y:.2f}')

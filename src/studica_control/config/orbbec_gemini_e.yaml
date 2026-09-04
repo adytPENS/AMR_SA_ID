@@ -1,0 +1,65 @@
+# Orbbec Gemini E (USB 2.0) launch configuration.
+# These keys are forwarded to the official gemini_e.launch.py as launch args.
+camera:
+  camera_name: camera
+  vendor_id: "0x2bc5"
+  product_id: "0x065c"
+  serial_number: ""
+  usb_port: ""
+  device_num: 1
+  connection_delay: 100
+
+  # RGB stream (separate UVC sensor in the Gemini E).
+  enable_color: true
+  color_width: 640
+  color_height: 360
+  # Gemini E mendukung profil RGB ini secara resmi.
+  color_fps: 30
+  color_format: MJPG
+  uvc_backend: v4l2
+  flip_color: false
+  enable_color_auto_exposure: true
+  enable_color_auto_white_balance: true
+
+  # Depth stream. These are the defaults validated by Orbbec for Gemini E.
+  enable_depth: true
+  depth_width: 640
+  depth_height: 360
+  depth_fps: 30
+  depth_format: Y11
+  flip_depth: false
+
+  # Keep IR off during normal RGB-D operation to reduce USB/CPU load.
+  enable_ir: false
+  ir_width: 640
+  ir_height: 480
+  ir_fps: 30
+  ir_format: Y10
+
+  # Point cloud cukup berat untuk Raspberry Pi; aktifkan hanya saat diperlukan.
+  enable_point_cloud: false
+  enable_colored_point_cloud: false
+  ordered_pc: false
+  # Align depth coordinates to RGB for accurate detection overlays.
+  depth_registration: true
+  align_mode: HW
+  publish_tf: true
+  tf_publish_rate: 0.0
+  enable_publish_extrinsic: true
+
+  # Gemini E depth processing.
+  enable_ldp: true
+  enable_soft_filter: true
+  soft_filter_max_diff: -1
+  soft_filter_speckle_size: -1
+  laser_energy_level: -1
+  enable_heartbeat: false
+
+  color_qos: sensor_data
+  color_camera_info_qos: default
+  depth_qos: sensor_data
+  depth_camera_info_qos: default
+  ir_qos: sensor_data
+  ir_camera_info_qos: default
+  point_cloud_qos: sensor_data
+  log_level: info

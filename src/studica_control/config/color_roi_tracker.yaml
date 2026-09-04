@@ -1,0 +1,14 @@
+color_roi_tracker:
+  ros__parameters:
+    color_topic: /camera/color/image_raw
+    depth_topic: /camera/depth/image_raw
+    camera_info_topic: /camera/depth/camera_info
+    object_label: "Object #1"
+    min_contour_area: 200
+    morphology_kernel: 5
+    hsv_margin_h: 8
+    hsv_margin_s: 25
+    hsv_margin_v: 25
+    calibration_file: /home/vmx/studica_ws/config/color_object_1_hsv.yaml
+    load_saved_calibration: true
+    jpeg_quality: 75

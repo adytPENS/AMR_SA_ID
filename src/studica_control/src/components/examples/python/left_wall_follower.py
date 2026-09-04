@@ -35,6 +35,8 @@ class LeftWallFollower(Node):
         self.opening_start = None
         self.opening_missing_since = None
         self.turn_target = 0.0
+        self.turn_within_since = None
+        self.turn_timeout = 7.0
         self.opening_cooldown = 0.0
         self.create_subscription(LaserScan, '/scan', self.scan_cb,
                                  qos_profile_sensor_data)
@@ -108,6 +110,14 @@ class LeftWallFollower(Node):
     def angle_error(target, current):
         return math.atan2(math.sin(target - current), math.cos(target - current))
 
+    def begin_turn(self, state, yaw, angle):
+        """Mulai belok relatif dengan target yaw absolut yang ternormalisasi."""
+        self.turn_target = math.atan2(
+            math.sin(yaw + angle), math.cos(yaw + angle))
+        self.turn_within_since = None
+        self.state_started = time.monotonic()
+        self.state = state
+
     def start_cb(self, msg):
         pressed = (not msg.data) and self.last_start is False
         self.last_start = not msg.data
@@ -176,25 +186,35 @@ class LeftWallFollower(Node):
 
         if self.state == 'STOP_BEFORE_RIGHT':
             if now - self.state_started >= 0.35:
-                self.turn_target = self.angle_error(yaw - math.pi / 2.0, 0.0)
-                self.state = 'TURN_RIGHT'
+                self.begin_turn('TURN_RIGHT', yaw, -math.pi / 2.0)
         elif self.state in ('TURN_RIGHT', 'TURN_LEFT'):
             error = self.angle_error(self.turn_target, yaw)
-            if abs(error) <= math.radians(5.0):
-                old_state = self.state
-                self.state = 'FOLLOW'
-                self.opening_cooldown = now + 1.2
-                self.opening_missing_since = None
-                self.get_logger().info(f'{old_state} selesai; lanjut trace kiri')
+            if now - self.state_started > self.turn_timeout:
+                self.deactivate(f'{self.state} timeout sebelum mencapai 90 derajat')
+                return
+            if abs(error) <= math.radians(4.0):
+                # Motor dihentikan dan sudut harus bertahan agar momentum robot
+                # berbeban tidak membuat belokan melewati target.
+                if self.turn_within_since is None:
+                    self.turn_within_since = now
+                if now - self.turn_within_since >= 0.25:
+                    old_state = self.state
+                    self.state = 'FOLLOW'
+                    self.opening_cooldown = now + 1.2
+                    self.opening_missing_since = None
+                    self.get_logger().info(
+                        f'{old_state} 90 derajat selesai; lanjut trace kiri')
             else:
-                speed = 1.10 if abs(error) > math.radians(15.0) else 0.60
+                self.turn_within_since = None
+                # Cepat ketika jauh, lalu proporsional dan pelan di dekat
+                # target untuk mengurangi overshoot.
+                speed = clamp(2.0 * abs(error), 0.35, 1.60)
                 command.angular.z = math.copysign(speed, error)
         elif self.state == 'PASS_LEFT_OPENING':
             travelled = math.hypot(x - self.opening_start[0],
                                     y - self.opening_start[1])
             if travelled >= 0.45:
-                self.turn_target = self.angle_error(yaw + math.pi / 2.0, 0.0)
-                self.state = 'TURN_LEFT'
+                self.begin_turn('TURN_LEFT', yaw, math.pi / 2.0)
                 self.get_logger().info(
                     'Bodi sudah melewati ujung tembok; putar kiri 90 derajat')
             else:

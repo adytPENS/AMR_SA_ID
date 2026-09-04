@@ -207,6 +207,8 @@ class WaypointNavigator(Node):
             Trigger, '/waypoint_navigator/start', self.start_callback)
         self.create_service(
             Trigger, '/waypoint_navigator/stop', self.stop_callback)
+        self.create_service(
+            Trigger, '/waypoint_navigator/set_ready', self.set_ready_callback)
         self.timer = self.create_timer(0.04, self.control_loop)
         self.odom_reset_client = self.create_client(
             Empty, '/wheel_odometry/reset')
@@ -248,10 +250,12 @@ class WaypointNavigator(Node):
         self.start_pending = False
         self.reset_request_time = 0.0
         self.reset_response_received = False
-        self.desired_light_command = 'red'
+        self.ready = False
+        self.desired_light_command = 'off'
         self.sent_light_command: Optional[str] = None
-        # Tegaskan kondisi awal setelah seluruh client/state siap dibuat.
-        self.set_state('IDLE')
+        # Lampu tetap mati selama launcher memeriksa seluruh stack. Launcher
+        # memanggil /waypoint_navigator/set_ready setelah semuanya siap.
+        self.set_state('BOOTING')
 
         points = ', '.join(
             f'{name}=({self.waypoints[name][0]:.2f}, '
@@ -428,6 +432,8 @@ class WaypointNavigator(Node):
             self.get_logger().warning('STOP BUTTON: navigator dan motor STOP')
 
     def request_start(self) -> Tuple[bool, str]:
+        if not self.ready:
+            return False, 'robot masih BOOTING; tunggu lampu merah READY'
         if self.active or self.start_pending:
             return False, 'navigator sudah aktif atau sedang start'
         stop_state_is_fresh = (
@@ -505,6 +511,19 @@ class WaypointNavigator(Node):
         self.get_logger().info(response.message)
         return response
 
+    def set_ready_callback(self, _request, response):
+        if self.active or self.start_pending:
+            response.success = False
+            response.message = 'navigator sedang aktif; READY ditolak'
+            return response
+        self.ready = True
+        self.set_state('IDLE')
+        self.stop_motors()
+        response.success = True
+        response.message = 'robot READY; lampu merah menyala, START diizinkan'
+        self.get_logger().info(response.message)
+        return response
+
     def stop_callback(self, _request, response):
         self.active = False
         self.start_pending = False
@@ -519,7 +538,9 @@ class WaypointNavigator(Node):
     def set_state(self, state: str) -> None:
         self.state = state
         self.state_started = time.monotonic()
-        if state == 'DONE':
+        if state == 'BOOTING':
+            self.set_light('off')
+        elif state == 'DONE':
             self.set_light('red:blink_hw')
         elif state == 'WAIT_AT_WAYPOINT':
             self.set_light('yellow:blink_hw')
@@ -598,6 +619,8 @@ class WaypointNavigator(Node):
         if not self.active:
             if self.state == 'DONE':
                 self.set_light('red:blink_hw')
+            elif self.state == 'BOOTING':
+                self.set_light('off')
             else:
                 self.set_light('red')
             self.publish_drive(0.0, 0.0)

@@ -107,7 +107,12 @@ W = maju
 S = mundur
 A = putar kiri
 D = putar kanan
-G = maju sesuai target jarak encoder
+G = servo pin 18 mendorong gripper ke depan
+H = servo pin 18 menarik gripper ke belakang
+R = servo pin 19 menaikkan ujung gripper
+T = servo pin 19 menurunkan ujung gripper
+Y = servo continuous pin 20 membuka end effector
+U = servo continuous pin 20 menutup end effector
 I = gripper naik (Titan CAN 10 M2)
 K = gripper turun (Titan CAN 10 M2)
 J = gripper berputar CCW (Titan CAN 10 M3)
@@ -118,7 +123,8 @@ Q = stop dan keluar
 
 Tombol harus ditahan. Jika keyboard tidak menerima pengulangan tombol selama
 `release-timeout` (default 0,65 detik), program mengirim nol ke `/cmd_vel`, M2,
-dan M3. Tombol E/Q, Ctrl+C, serta keluarnya program juga mengirim nol lima kali.
+M3, serta servo continuous pin 18/19/20. Tombol E/Q, Ctrl+C, serta keluarnya
+program juga mengirim nol lima kali ke seluruh aktuator yang harus berhenti.
 Watchdog drive controller menghentikan motor base jika `/cmd_vel` terputus.
 
 Uji OMS pertama dengan robot tidak membawa objek:
@@ -142,6 +148,46 @@ duty 0,35:
 
 `--oms-speed` tetap tersedia sebagai nilai bersama jika opsi terpisah tidak
 diberikan.
+
+Secara default OMS memakai PID software berdasarkan `/titan1/m_2/rpm` dan
+`/titan1/m_3/rpm`. Target lift dibedakan untuk melawan gravitasi: naik 40 RPM,
+turun 25 RPM (Maverick 61:1, maksimum 100 RPM). Rotasi memakai target 35 RPM
+(Maverick 26.9:1, maksimum 227 RPM):
+
+```bash
+./scripts/start_full_keyboard.sh \
+  --lift-up-rpm 40 --lift-down-rpm 25 \
+  --rotate-rpm 35 --rotate-polarity -1
+```
+
+Saat mulai naik, program memberi boost duty 0,65 selama 0,20 detik. Saat mulai
+berotasi, program memberi boost duty 0,60 selama 0,25 detik untuk melepaskan
+gesekan awal gear 3D-print. Setelah itu PID kembali menjaga target RPM rendah.
+
+Sesudah uji tanpa beban berhasil, target dapat dinaikkan bertahap. Untuk
+diagnosis encoder, PID dapat dimatikan sementara dan kembali memakai duty:
+
+```bash
+./scripts/start_full_keyboard.sh --no-oms-pid \
+  --lift-speed 0.20 --rotate-speed 0.20 --rotate-polarity -1
+```
+
+Jika feedback RPM hilang lebih dari 0,4 detik, kontrol OMS otomatis menjadi
+nol. PID hanya mengatur kecepatan selama tombol ditekan; ini bukan position
+hold dan belum menggantikan limit switch mekanis lift.
+
+Kecepatan awal pin 18 adalah 40 agar slide mempunyai tenaga lebih besar. Pin 19
+adalah 25 dan pin 20 adalah 15 dari rentang 1..100. Kalibrasi dan pastikan
+linkage tidak menyentuh mechanical stop:
+
+```bash
+./scripts/start_full_keyboard.sh \
+  --slide-speed 15 --wrist-speed 15 --gripper-speed 10 \
+  --rotate-polarity -1
+```
+
+Jika arah salah gunakan `--slide-polarity -1`, `--wrist-polarity -1`, atau
+`--gripper-polarity -1`. Ketiga servo hanya bergerak selama tombolnya ditahan.
 
 Uji berurutan: tekan `W` sebentar, lalu `S`, `A`, dan `D`. Jangan menggunakan
 `G` sebelum empat arah dasar dan penghentian otomatis dipastikan benar.

@@ -255,6 +255,9 @@ set(python_example_scripts
   src/components/examples/python/cobra_example.py
   src/components/examples/python/gamepad_example.py
   src/components/examples/python/light_tower_example.py
+  src/components/examples/python/rgbd_object_detector.py
+  src/components/examples/python/local_detection_viewer.py
+  src/components/examples/python/color_roi_tracker.py
 )
 
 install(PROGRAMS ${python_example_scripts}

@@ -96,6 +96,12 @@ if ! kill -0 "$HARDWARE_PID" 2>/dev/null; then
   exit 1
 fi
 
+echo "BOOTING — mematikan seluruh lampu sampai robot benar-benar siap..."
+for topic in /light_control/cmd /light_red/cmd /light_green/cmd /light_yellow/cmd; do
+  ros2 topic pub --once "$topic" std_msgs/msg/Bool "{data: false}" \
+    >/dev/null
+done
+
 echo "Inisialisasi encoder M0-M3..."
 bash "$PROJECT_ROOT/scripts/init_titan_encoders.sh"
 
@@ -130,6 +136,18 @@ for _ in {1..10}; do
 done
 if [[ "$NAVIGATOR_READY" != "true" ]]; then
   echo "ERROR: /waypoint_navigator/start tidak tersedia; navigator gagal dibuat." >&2
+  exit 1
+fi
+
+# Ini adalah batas resmi antara BOOTING dan READY. Sampai seluruh pemeriksaan
+# di atas berhasil, navigator mempertahankan C/R/G/Y dalam keadaan OFF dan
+# menolak perintah START.
+READY_RESPONSE="$(ros2 service call /waypoint_navigator/set_ready \
+  std_srvs/srv/Trigger "{}" 2>&1)"
+if ! grep -Fq 'success=True' <<<"$READY_RESPONSE" && \
+   ! grep -Fq 'success: true' <<<"$READY_RESPONSE"; then
+  echo "ERROR: navigator gagal masuk status READY." >&2
+  echo "$READY_RESPONSE" >&2
   exit 1
 fi
 

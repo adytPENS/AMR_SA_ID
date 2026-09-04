@@ -1,0 +1,46 @@
+rgbd_object_detector:
+  ros__parameters:
+    depth_topic: /camera/depth/image_raw
+    camera_info_topic: /camera/depth/camera_info
+    color_topic: /camera/color/image_raw
+    min_depth_mm: 200
+    max_depth_mm: 2500
+
+    # Automatic background estimate. Increase the gap if the floor/table is noisy.
+    background_depth_mm: 0
+    foreground_gap_mm: 35
+    min_area_px: 250
+    max_area_px: 120000
+    detection_rate_hz: 8.0
+    debug_jpeg_quality: 70
+    min_color_saturation: 45
+
+    # Optional working-area ROI in depth-image pixels. A zero size selects
+    # the full image automatically.
+    roi_x: 372
+    roi_y: 96
+    roi_width: 32
+    roi_height: 29
+    show_roi: true
+    tracking_enabled: true
+    tracking_match_distance_m: 0.30
+    tracking_max_age_sec: 1.0
+    tracking_smoothing: 0.65
+
+    # Physical size rules from the competition document (millimetres).
+    object_1_width_min: 50.0
+    object_1_width_max: 75.0
+    object_1_height_min: 100.0
+    object_1_height_max: 160.0
+
+    object_2_width_min: 80.0
+    object_2_width_max: 110.0
+    object_2_length_min: 120.0
+    object_2_length_max: 180.0
+    object_2_height_min: 40.0
+    object_2_height_max: 60.0
+
+    object_3_width_min: 120.0
+    object_3_width_max: 160.0
+    object_3_height_min: 50.0
+    object_3_height_max: 70.0

@@ -8,11 +8,11 @@ waypoints:
   B: {x: 0.00, y: 3.37, arrival: odometry_or_lidar}
   C: {x: 1.29, y: 0.68, arrival: odometry_or_lidar}
   # Tambahkan titik aman sesuai map, misalnya:
-  P1: {x: 1.28, y: 0.00, arrival: odometry}
+  P1: {x: 1.28, y: 0.00, arrival: oodometry_or_lidar}
   P2: {x: 0.77, y: 0.68, arrival: odometry}
   P3: {x: 1.29, y: 0.68, arrival: odometry}
-  P4: {x: 1.37, y: 3.4, arrival: odometry}
-  S: {x: 0.00, y: 0.00, arrival: odometry}
+  P4: {x: 1.37, y: 3.4, arrival: odometry_or_lidar}
+  S: {x: 0.00, y: 0.00, arrival: odometry_or_lidar}
 
 sequence: [P1, P4, B, P4, P3, A, C, P1, S]
 
@@ -28,9 +28,9 @@ stop_button:
   debounce_ms: 250
 
 motion:
-  linear_speed: 0.30
+  linear_speed: 0.40
   minimum_linear_speed: 0.10
-  angular_speed: 1.20
+  angular_speed: 1.60
   heading_kp: 1.20
   distance_kp: 0.50
   max_heading_correction: 0.30

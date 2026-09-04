@@ -15,6 +15,20 @@ control_server:
     light_tower:
       enabled: false
 
+    # Servo OMS: ketiganya continuous sesuai servo 75002 yang terpasang.
+    servo:
+      enabled: true
+      sensors: ["oms_slide", "oms_wrist", "oms_gripper"]
+      oms_slide:
+        port: 18
+        type: "continuous"
+      oms_wrist:
+        port: 19
+        type: "continuous"
+      oms_gripper:
+        port: 20
+        type: "continuous"
+
     # Push START dan STOP active-low pada DIO 10 dan DIO 11.
     dio:
       enabled: true
@@ -87,6 +101,8 @@ control_server:
 
       # Titan OMS bagian atas robot pada CAN ID 10.
       # M2 = naik/turun gripper, M3 = rotasi gripper CCW/CW.
+      # M2 Maverick 61:1, 100 RPM, encoder output 1464 count/rev.
+      # M3 Maverick 26.9:1, 227 RPM, encoder output 645.6 count/rev.
       # M0 dan M1 belum digunakan tetapi wajib tetap terdefinisi oleh driver.
       titan1:
         can_id: 10
@@ -102,7 +118,9 @@ control_server:
           dist_per_tick: 1.0
         m_2:
           encoder_mode: "quadrature"
-          dist_per_tick: 1.0
+          # Output shaft revolution per encoder count: 1 / 1464.
+          dist_per_tick: 0.000683060109
         m_3:
           encoder_mode: "quadrature"
-          dist_per_tick: 1.0
+          # Output shaft revolution per encoder count: 1 / 645.6.
+          dist_per_tick: 0.001548946716

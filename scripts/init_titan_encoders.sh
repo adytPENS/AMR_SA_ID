@@ -11,9 +11,19 @@ export RMW_IMPLEMENTATION=rmw_cyclonedds_cpp
 set -u
 
 SERVICE="/titan0/titan_cmd"
-if ! timeout 5 ros2 service list --no-daemon --spin-time 2 2>/dev/null | \
-    grep -Fxq "$SERVICE"; then
-  echo "ERROR: $SERVICE belum tersedia. Jalankan control_server dahulu." >&2
+SERVICE_READY=false
+echo "Menunggu discovery $SERVICE (maksimal 45 detik)..."
+for _ in {1..15}; do
+  if timeout 5 ros2 service list --no-daemon --spin-time 2 2>/dev/null | \
+      grep -Fxq "$SERVICE"; then
+    SERVICE_READY=true
+    break
+  fi
+  sleep 1
+done
+if [[ "$SERVICE_READY" != true ]]; then
+  echo "ERROR: $SERVICE tidak ditemukan setelah 45 detik." >&2
+  echo "Pastikan hanya satu control_server aktif dan RMW memakai CycloneDDS." >&2
   exit 1
 fi
 

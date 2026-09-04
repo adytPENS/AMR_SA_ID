@@ -1,0 +1,71 @@
+# Navigasi corridor hybrid: koordinat menentukan kapan mode trace selesai.
+# Semua koordinat lokal terhadap posisi dan arah robot ketika START ditekan.
+navigator: hybrid_corridor
+coordinate_mode: local
+
+# `control` adalah cara bergerak DARI titik sebelumnya MENUJU titik ini.
+# Kalibrasikan koordinat ini terhadap arena sebelum pengujian cepat.
+waypoints:
+  P1: {x: 1.43, y: 0.00, control: odometry}
+  # Langkah belok tidak memerlukan x/y; yaw target diambil relatif dari IMU.
+  T1: {control: turn_left_90}
+  # Mode lain yang tersedia untuk titik belok:
+  # TR: {control: turn_right_90}
+  # TL180: {control: turn_left_180}
+  # TR180: {control: turn_right_180}
+  # H1: {control: turn_heading, heading_deg: 90.0}
+  P2: {x: 1.43, y: 0.50, control: trace_right, wall_distance: 0.40, heading_deg: 90.0}
+  P6: {x: 1.43, y: 0.50, control: trace_left, wall_distance: 0.40, heading_deg: -90.0}
+  
+  P3: {x: 1.43, y: 3.50, control: odometry, arrival: coordinate_or_front_wall, front_arrival_distance: 0.15}
+  # Setelah mencapai ujung lorong di P3, hadapkan robot ke arah B dahulu.
+  T2: {control: turn_left_90}
+  T3: {control: turn_right_180}
+  T4: {control: turn_right_90}
+  B:  {x: 0.00, y: 3.37, control: trace_right, wall_distance: 0.40, arrival: coordinate_or_front_wall, front_arrival_distance: 0.15}
+  P4: {x: 1.43, y: 3.50, control: trace_left, wall_distance: 0.40, arrival: coordinate_or_front_wall, front_arrival_distance: 0.15}
+  P5: {x: 1.00, y: 0.50, control: odometry}
+  A:  {x: 0.00, y: 0.68, control: odometry, arrival: coordinate_or_front_wall, front_arrival_distance: 0.15}
+  C:  {x: 1.29, y: 0.68, control: odometry, arrival: coordinate_or_front_wall, front_arrival_distance: 0.15}
+  S:  {x: 0.00, y: 0.00, control: trace_left, wall_distance: 0.40, arrival: coordinate_or_front_wall, front_arrival_distance: 0.15}
+  
+
+sequence: [P1, P3, B, P4, P6, P5, A, C, P1, S]
+
+start_button:
+  enabled: true
+  topic: /start_button/state
+  active_high: false
+  debounce_ms: 250
+stop_button:
+  enabled: true
+  topic: /stop_button/state
+  active_high: false
+  debounce_ms: 250
+
+motion:
+  linear_speed: 0.40
+  trace_speed: 0.28
+  approach_speed: 0.12
+  angular_speed: 1.60
+  # Robot berbeban memerlukan command minimum yang cukup untuk melawan
+  # gesekan statis ketika sudah dekat dengan target sudut.
+  minimum_turn_speed: 0.65
+  turn_tolerance_deg: 6.0
+  turn_settle_time: 0.20
+  turn_timeout: 12.0
+  heading_kp: 1.80
+  wall_kp: 1.60
+  wall_angle_kp: 0.80
+  max_trace_turn: 0.65
+  position_tolerance: 0.15
+  approach_radius: 0.45
+  align_tolerance_deg: 7.0
+  front_stop_distance: 0.06
+  front_slow_distance: 0.40
+  wall_visible_distance: 1.20
+  scan_timeout: 0.70
+  odom_timeout: 0.60
+  # Hanya titik tugas A/B/C/D yang berhenti; titik bantu P langsung lanjut.
+  pause_waypoints: [A, B, C, D]
+  waypoint_pause_seconds: 5.0

@@ -5,10 +5,25 @@ SCRIPT_DIR="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)"
 PROJECT_ROOT="$(cd -- "$SCRIPT_DIR/.." && pwd)"
 ODOM_NODE="$PROJECT_ROOT/src/studica_control/src/components/examples/python/wheel_odometry.py"
 ODOM_PARAMS="$PROJECT_ROOT/src/studica_control/config/wheel_odometry.yaml"
-NAV_NODE="$PROJECT_ROOT/src/studica_control/src/components/examples/python/waypoint_navigator.py"
+DEFAULT_NAV_NODE="$PROJECT_ROOT/src/studica_control/src/components/examples/python/waypoint_navigator.py"
+HYBRID_NAV_NODE="$PROJECT_ROOT/src/studica_control/src/components/examples/python/hybrid_corridor_navigator.py"
 DRIVE_NODE="$PROJECT_ROOT/src/studica_control/src/components/examples/python/drive_controller.py"
 DRIVE_CONFIG="$PROJECT_ROOT/src/studica_control/config/drive_controller.yaml"
 WAYPOINTS="${1:-$PROJECT_ROOT/src/studica_control/config/waypoints.yaml}"
+
+NAVIGATOR_TYPE="$(python3 - "$WAYPOINTS" <<'PY'
+import sys
+import yaml
+with open(sys.argv[1], encoding='utf-8') as stream:
+    config = yaml.safe_load(stream) or {}
+print(config.get('navigator', 'waypoint'))
+PY
+)"
+if [[ "$NAVIGATOR_TYPE" == "hybrid_corridor" ]]; then
+  NAV_NODE="$HYBRID_NAV_NODE"
+else
+  NAV_NODE="$DEFAULT_NAV_NODE"
+fi
 
 source /opt/ros/humble/setup.bash
 source "$PROJECT_ROOT/install/setup.bash"
@@ -111,12 +126,10 @@ DRIVE_PID=$!
 python3 "$NAV_NODE" --config "$WAYPOINTS" &
 NAV_PID=$!
 
-# Navigator menulis status C/R/G/Y langsung ke topic DIO setiap 0,5 detik.
-# Beri waktu satu siklus agar kondisi awal red solid sudah terkirim.
+# Navigator tetap BOOTING dengan semua lampu mati. Launcher utama akan
+# memanggil /waypoint_navigator/set_ready setelah seluruh stack diperiksa.
 sleep 1
 
-echo "Mode waypoint siap, motor masih STOP."
-echo "Mulai dari terminal lain:"
-echo "ros2 service call /waypoint_navigator/start std_srvs/srv/Trigger \"{}\""
+echo "Mode waypoint dibuat; menunggu konfirmasi READY dari launcher utama."
 echo "Tekan Ctrl+C di sini untuk emergency stop."
 wait "$NAV_PID"
