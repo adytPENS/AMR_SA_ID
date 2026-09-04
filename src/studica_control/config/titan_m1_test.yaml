@@ -54,7 +54,7 @@ control_server:
     # DIP switch / CAN ID pada Titan yang akan diuji.
     titan:
       enabled: true
-      sensors: ["titan0"]
+      sensors: ["titan0", "titan1"]
       titan0:
         can_id: 42
         motor_freq: 15600
@@ -84,3 +84,25 @@ control_server:
         m_3:
           encoder_mode: "quadrature"
           dist_per_tick: 0.000308604386
+
+      # Titan OMS bagian atas robot pada CAN ID 10.
+      # M2 = naik/turun gripper, M3 = rotasi gripper CCW/CW.
+      # M0 dan M1 belum digunakan tetapi wajib tetap terdefinisi oleh driver.
+      titan1:
+        can_id: 10
+        motor_freq: 15600
+        encoder_rate_hz: 10
+        motor_update_rate_hz: 50
+        enable_freshness: false
+        m_0:
+          encoder_mode: "quadrature"
+          dist_per_tick: 1.0
+        m_1:
+          encoder_mode: "quadrature"
+          dist_per_tick: 1.0
+        m_2:
+          encoder_mode: "quadrature"
+          dist_per_tick: 1.0
+        m_3:
+          encoder_mode: "quadrature"
+          dist_per_tick: 1.0

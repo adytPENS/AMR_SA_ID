@@ -31,6 +31,8 @@ cleanup() {
   done
   timeout 2 ros2 service call /titan0/titan_cmd studica_control/srv/SetData \
     "{params: 'disable'}" >/dev/null 2>&1 || true
+  timeout 2 ros2 service call /titan1/titan_cmd studica_control/srv/SetData \
+    "{params: 'disable'}" >/dev/null 2>&1 || true
   kill "${SLAM_PID:-}" "${DRIVE_PID:-}" "${ODOM_PID:-}" \
        "${LIDAR_PID:-}" "${HARDWARE_PID:-}" 2>/dev/null || true
   pkill -TERM -f '[y]dlidar_ros2_driver_node' 2>/dev/null || true

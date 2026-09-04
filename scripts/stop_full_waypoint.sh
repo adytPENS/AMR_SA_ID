@@ -15,6 +15,9 @@ timeout 3 ros2 service call /waypoint_navigator/stop \
 timeout 3 ros2 service call /titan0/titan_cmd \
   studica_control/srv/SetData "{params: 'disable'}" \
   >/dev/null 2>&1 || true
+timeout 3 ros2 service call /titan1/titan_cmd \
+  studica_control/srv/SetData "{params: 'disable'}" \
+  >/dev/null 2>&1 || true
 
 echo "Menghentikan proses waypoint..."
 pkill -TERM -f "$PROJECT_ROOT/scripts/start_full_navigation.sh" 2>/dev/null || true

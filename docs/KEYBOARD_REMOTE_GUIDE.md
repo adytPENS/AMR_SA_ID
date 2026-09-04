@@ -6,6 +6,13 @@ Panduan ini menjalankan remote keyboard menggunakan arsitektur terbaru:
 Keyboard -> /cmd_vel -> inverse kinematics -> PID M0-M3 -> Titan
 ```
 
+Konfigurasi saat ini juga memuat Titan OMS kedua pada CAN ID 10:
+
+```text
+Keyboard I/K -> /titan1/m_2/cmd -> naik/turun gripper
+Keyboard J/L -> /titan1/m_3/cmd -> rotasi gripper CCW/CW
+```
+
 Gunakan tiga terminal. Untuk pengujian pertama, angkat robot dengan penyangga
 yang kuat atau kosongkan area lantai. Tutup semua program motor lama agar tidak
 ada dua node yang mengirim perintah gerak bersamaan.
@@ -65,6 +72,14 @@ ros2 service call /titan0/titan_cmd \
   "{params: 'enable'}"
 ```
 
+Aktifkan Titan OMS CAN ID 10:
+
+```bash
+ros2 service call /titan1/titan_cmd \
+  studica_control/srv/SetData \
+  "{params: 'enable'}"
+```
+
 Jalankan keyboard dengan kecepatan rendah dahulu:
 
 ```bash
@@ -82,12 +97,30 @@ S = mundur
 A = putar kiri
 D = putar kanan
 G = maju sesuai target jarak encoder
+I = gripper naik (Titan CAN 10 M2)
+K = gripper turun (Titan CAN 10 M2)
+J = gripper berputar CCW (Titan CAN 10 M3)
+L = gripper berputar CW (Titan CAN 10 M3)
 E = stop
 Q = stop dan keluar
 ```
 
-Tombol arah harus ditahan. Ketika dilepas, keyboard mengirim `/cmd_vel` nol;
-watchdog drive controller juga menghentikan motor jika perintah terputus.
+Tombol harus ditahan. Jika keyboard tidak menerima pengulangan tombol selama
+`release-timeout` (default 0,65 detik), program mengirim nol ke `/cmd_vel`, M2,
+dan M3. Tombol E/Q, Ctrl+C, serta keluarnya program juga mengirim nol lima kali.
+Watchdog drive controller menghentikan motor base jika `/cmd_vel` terputus.
+
+Uji OMS pertama dengan robot tidak membawa objek:
+
+```bash
+python3 \
+  /home/vmx/studica_ws/src/studica_control/src/components/examples/python/titan_keyboard_teleop.py \
+  --linear-speed 0.15 --angular-speed 0.8 --oms-speed 0.10
+```
+
+Jika arah M2 terbalik, tambahkan `--lift-polarity -1`. Jika arah CCW/CW M3
+terbalik, tambahkan `--rotate-polarity -1`. Jangan melebihi batas mekanis.
+M2 lift harus dilengkapi limit switch sebelum pengujian kecepatan/beban tinggi.
 
 Uji berurutan: tekan `W` sebentar, lalu `S`, `A`, dan `D`. Jangan menggunakan
 `G` sebelum empat arah dasar dan penghentian otomatis dipastikan benar.
@@ -123,6 +156,10 @@ export RMW_IMPLEMENTATION=rmw_cyclonedds_cpp
 ros2 service call /titan0/titan_cmd \
   studica_control/srv/SetData \
   "{params: 'disable'}"
+
+ros2 service call /titan1/titan_cmd \
+  studica_control/srv/SetData \
+  "{params: 'disable'}"
 ```
 
 Jika motor masih bergerak, putuskan daya 12 V Titan menggunakan emergency stop
@@ -136,4 +173,3 @@ fisik. Jangan memegang roda yang sedang berputar.
 
 Urutan ini memastikan `/cmd_vel` dan duty motor menjadi nol sebelum hardware
 server ditutup.
-
