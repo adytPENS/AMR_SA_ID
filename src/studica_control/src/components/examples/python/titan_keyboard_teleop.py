@@ -58,6 +58,8 @@ def parse_args():
     parser.add_argument('--sensor', default='titan0')
     parser.add_argument('--oms-sensor', default='titan1')
     parser.add_argument('--oms-speed', type=float, default=0.20)
+    parser.add_argument('--lift-speed', type=float, default=None)
+    parser.add_argument('--rotate-speed', type=float, default=None)
     parser.add_argument('--lift-polarity', type=float, choices=(-1.0, 1.0),
                         default=1.0)
     parser.add_argument('--rotate-polarity', type=float, choices=(-1.0, 1.0),
@@ -76,6 +78,14 @@ def parse_args():
         parser.error('--release-timeout harus 0.10..1.50 detik')
     if not 0.05 <= args.oms_speed <= 0.60:
         parser.error('--oms-speed harus 0.05..0.60 duty')
+    args.lift_speed = (
+        args.oms_speed if args.lift_speed is None else args.lift_speed)
+    args.rotate_speed = (
+        args.oms_speed if args.rotate_speed is None else args.rotate_speed)
+    if not 0.05 <= args.lift_speed <= 0.60:
+        parser.error('--lift-speed harus 0.05..0.60 duty')
+    if not 0.05 <= args.rotate_speed <= 0.60:
+        parser.error('--rotate-speed harus 0.05..0.60 duty')
     if not 0.05 <= args.distance <= 5.0:
         parser.error('--distance harus 0.05..5.0 meter')
     return args
@@ -93,10 +103,10 @@ def main() -> None:
         'd': (0.0, -args.angular_speed),
     }
     oms_commands = {
-        'i': (args.oms_speed * args.lift_polarity, 0.0),       # naik
-        'k': (-args.oms_speed * args.lift_polarity, 0.0),      # turun
-        'j': (0.0, args.oms_speed * args.rotate_polarity),     # CCW
-        'l': (0.0, -args.oms_speed * args.rotate_polarity),    # CW
+        'i': (args.lift_speed * args.lift_polarity, 0.0),       # naik
+        'k': (-args.lift_speed * args.lift_polarity, 0.0),      # turun
+        'j': (0.0, args.rotate_speed * args.rotate_polarity),   # CCW
+        'l': (0.0, -args.rotate_speed * args.rotate_polarity),  # CW
     }
     active_key = None
     last_key_time = 0.0
@@ -114,6 +124,9 @@ def main() -> None:
         node.get_logger().info(
             f'/cmd_vel linear={args.linear_speed:.2f}m/s, '
             f'angular={args.angular_speed:.2f}rad/s')
+        node.get_logger().info(
+            f'OMS lift duty={args.lift_speed:.2f}, '
+            f'rotate duty={args.rotate_speed:.2f}')
         wait_until = time.monotonic() + 1.0
         while time.monotonic() < wait_until:
             node.publish_cmd(0.0, 0.0)

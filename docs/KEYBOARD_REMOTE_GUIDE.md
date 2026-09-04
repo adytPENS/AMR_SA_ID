@@ -133,6 +133,16 @@ Jika arah M2 terbalik, tambahkan `--lift-polarity -1`. Jika arah CCW/CW M3
 terbalik, tambahkan `--rotate-polarity -1`. Jangan melebihi batas mekanis.
 M2 lift harus dilengkapi limit switch sebelum pengujian kecepatan/beban tinggi.
 
+Kecepatan M2 dan M3 dapat diatur terpisah. Contoh lift duty 0,20 dan rotasi
+duty 0,35:
+
+```bash
+./scripts/start_full_keyboard.sh --lift-speed 0.20 --rotate-speed 0.35
+```
+
+`--oms-speed` tetap tersedia sebagai nilai bersama jika opsi terpisah tidak
+diberikan.
+
 Uji berurutan: tekan `W` sebentar, lalu `S`, `A`, dan `D`. Jangan menggunakan
 `G` sebelum empat arah dasar dan penghentian otomatis dipastikan benar.
 
