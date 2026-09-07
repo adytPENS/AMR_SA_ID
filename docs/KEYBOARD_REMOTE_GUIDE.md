@@ -393,3 +393,15 @@ source /home/vmx/studica_ws/install/setup.bash
 Build ini memasang perubahan driver untuk digunakan pada peluncuran berikutnya.
 Keberhasilan kompilasi belum membuktikan penurunan CPU atau kestabilan kontrol;
 uji kembali keyboard, kamera, dan waypoint setelah restart program.
+
+
+## Mode M dengan misi YAML
+
+Atur posisi default OMS dengan keyboard, tekan M untuk menyimpan, kemudian
+START fisik menjalankan `mission` dalam `config/human_interaction.yaml`.
+Default hanya contoh lampu 2 detik. Seluruh contoh instruksi aktif ada di
+`config/human_interaction_examples.yaml`; panduan parameter dan sensor ada di
+[HUMAN_INTERACTION_GUIDE.md](HUMAN_INTERACTION_GUIDE.md).
+E/X atau STOP fisik membatalkan misi. Tombol manual tidak mengambil alih
+selama RUNNING; keluar ke manual dahulu dengan E/X. Wheel odometry sekarang
+ikut dijalankan launcher keyboard; LiDAR/kamera dijalankan terpisah sesuai misi.

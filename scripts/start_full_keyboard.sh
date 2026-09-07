@@ -46,8 +46,8 @@ cleanup() {
       studica_control/srv/SetData "{params: 'disable'}" \
       >/dev/null 2>&1 || true
   done
-  kill "${DRIVE_PID:-}" "${HARDWARE_PID:-}" 2>/dev/null || true
-  wait "${DRIVE_PID:-}" "${HARDWARE_PID:-}" 2>/dev/null || true
+  kill "${DRIVE_PID:-}" "${ODOM_PID:-}" "${HARDWARE_PID:-}" 2>/dev/null || true
+  wait "${DRIVE_PID:-}" "${ODOM_PID:-}" "${HARDWARE_PID:-}" 2>/dev/null || true
 }
 trap cleanup EXIT
 trap 'exit 130' INT
@@ -69,9 +69,17 @@ for titan in titan0 titan1; do
     "{params: 'enable'}"
 done
 
+python3 "$PROJECT_ROOT/src/studica_control/src/components/examples/python/wheel_odometry.py" \
+  --ros-args --params-file "$PROJECT_ROOT/src/studica_control/config/wheel_odometry.yaml" &
+ODOM_PID=$!
+
 python3 "$DRIVE" --config "$DRIVE_CONFIG" &
 DRIVE_PID=$!
 sleep 2
+if ! kill -0 "$ODOM_PID" 2>/dev/null; then
+  echo "ERROR: wheel odometry gagal berjalan." >&2
+  exit 1
+fi
 if ! kill -0 "$DRIVE_PID" 2>/dev/null; then
   echo "ERROR: drive controller gagal berjalan; lihat pesan Python di atas." >&2
   exit 1

@@ -275,6 +275,8 @@ set(python_example_scripts
   src/components/examples/python/rgbd_object_detector.py
   src/components/examples/python/local_detection_viewer.py
   src/components/examples/python/color_roi_tracker.py
+  src/components/examples/python/mission_runner.py
+  src/components/examples/python/mission_ros.py
   src/components/examples/python/human_interaction.py
   src/components/examples/python/yellow_follow_keyboard.py
 )

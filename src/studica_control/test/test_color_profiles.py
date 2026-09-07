@@ -149,3 +149,17 @@ class DepthSamplingTest(unittest.TestCase):
         with patch.object(tracker.time, 'monotonic', return_value=20.6):
             result = tracker.ColorRoiTracker.position_for_bbox(node, 2, 2, 8, 8, (12, 12))
         self.assertIsNone(result['distance_m'])
+
+
+class ShapeTests(unittest.TestCase):
+    def test_real_contour_shape_not_just_bounding_box(self):
+        rectangle = np.array([[0, 0], [80, 0], [80, 40], [0, 40]], np.int32).reshape(-1, 1, 2)
+        triangle = np.array([[0, 0], [80, 0], [40, 60]], np.int32).reshape(-1, 1, 2)
+        trapezoid = np.array([[0, 0], [80, 0], [50, 40], [30, 40]], np.int32).reshape(-1, 1, 2)
+        self.assertEqual(tracker.contour_shape(rectangle), 'rectangle')
+        self.assertEqual(tracker.contour_shape(triangle), 'triangle')
+        self.assertEqual(tracker.contour_shape(trapezoid), 'unknown')
+        frame = np.zeros((100, 100), np.uint8)
+        cv2.circle(frame, (50, 50), 30, 255, -1)
+        contours, _ = cv2.findContours(frame, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
+        self.assertEqual(tracker.contour_shape(contours[0]), 'circle')

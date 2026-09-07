@@ -18,6 +18,7 @@ from geometry_msgs.msg import Twist
 from rclpy.node import Node
 from std_msgs.msg import Bool, Float64, String
 from human_interaction import HumanInteraction
+from mission_ros import MissionROS
 from studica_control.srv import SetData
 from yellow_follow_keyboard import YellowFollower
 
@@ -173,6 +174,8 @@ class KeyboardCmdVel(Node):
                 human_config = yaml.safe_load(stream) or {}
         self.human = HumanInteraction(args.oms_default_file, time.monotonic,
                                       slide=human_config.get('slide'))
+        self.mission = MissionROS(self, human_config, args)
+        self.human.runner = self.mission.runner
         self.human_status = self.create_publisher(String, '/human_interaction/status', 10)
         self.human_last_status = None
         for name, motor in (('lift', 2), ('rotate', 3)):
@@ -542,6 +545,7 @@ def main() -> None:
                     last_key_time = now
                 elif key in ('e', 'x'):
                     node.human.cancel()
+                    node.mission.stop()
                     active_key = None
                     distance_active = False
                     node.stop()
@@ -554,6 +558,13 @@ def main() -> None:
                     node.stop()
                     node.initialize_standard_servos()
 
+            if node.human.state == 'RUNNING':
+                node.mission.tick()
+                node.human.message = node.mission.runner.message
+                if node.mission.runner.state != 'RUNNING':
+                    node.human.state = node.mission.runner.state
+            if node.human.owns_control:
+                node.mission.update_lights()
             node.human.tick({name: servo.target for name, servo in
                              node.standard_servos.items()})
             status = f'{node.human.state}: {node.human.message}'
@@ -561,6 +572,14 @@ def main() -> None:
                 node.get_logger().info(status)
                 node.human_status.publish(String(data=status))
                 node.human_last_status = status
+            if node.human.state == 'RUNNING':
+                auto_follow = False
+                active_key = None
+                distance_active = False
+                rclpy.spin_once(node, timeout_sec=0.0)
+                continue
+            if node.human.stop_pressed:
+                node.mission.stop()
             if node.human.owns_control or node.human.stop_pressed:
                 auto_follow = False
                 active_key = None
@@ -622,6 +641,7 @@ def main() -> None:
     except KeyboardInterrupt:
         pass
     finally:
+        node.mission.stop()
         node.stop()
         termios.tcsetattr(sys.stdin, termios.TCSADRAIN, old_terminal)
         node.get_logger().info('STOP — /cmd_vel nol')

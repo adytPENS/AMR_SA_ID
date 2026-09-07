@@ -1,8 +1,4 @@
-"""Human interaction mode preparation; independent of ROS and hardware.
-
-Only the preparation states are executable until the physical pickup and
-slide/rotation calibration have been supplied. No guessed movement is issued.
-"""
+"""Capture manual defaults, then hand START to the configured mission runner."""
 import json
 import math
 import os
@@ -17,7 +13,8 @@ class HumanInteraction:
     ERROR = 'ERROR'
 
     def __init__(self, snapshot_path, clock, settle_seconds=0.3,
-                 feedback_timeout=0.5, capture_timeout=3.0, slide=None):
+                 feedback_timeout=0.5, capture_timeout=3.0, slide=None, runner=None):
+        self.runner = runner
         self.slide = dict(slide or {})
         if self.slide:
             if self.slide.get('mode') != 'timed':
@@ -64,6 +61,8 @@ class HumanInteraction:
         self.message = 'Motor berhenti; menunggu feedback baru untuk posisi default'
 
     def cancel(self):
+        if self.runner is not None:
+            self.runner.cancel()
         self.state = self.MANUAL
         self.message = 'Keyboard manual; default tersimpan tetap ada'
 
@@ -77,10 +76,16 @@ class HumanInteraction:
             edge = self.start_pressed is False and pressed
             self.start_pressed = pressed
             if edge and self.state == self.READY and not self.stop_pressed:
-                # Explicitly inhibit automatic motion until its physical
-                # position references and pickup sequence are configured.
-                self.message = ('START ditahan: rasio putar, '
-                                'target objek dan urutan ambil belum tersedia')
+                if self.runner is None:
+                    self.message = 'START ditahan: runner misi belum dikonfigurasi'
+                    return
+                try:
+                    self.runner.start(self.snapshot)
+                    self.state = 'RUNNING'
+                    self.message = 'Misi YAML dimulai'
+                except (ValueError, TypeError, KeyError) as error:
+                    self.state = self.ERROR
+                    self.message = f'START gagal: {error}'
 
     def tick(self, servo_targets):
         if self.state != self.CAPTURE:

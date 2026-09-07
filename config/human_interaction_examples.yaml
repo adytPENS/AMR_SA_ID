@@ -1,0 +1,126 @@
+# KATALOG CONTOH AKTIF (uncommented): semua perintah di bawah akan dieksekusi
+# berurutan jika file ini dipilih. Bukan rute yang sudah diuji pada robot.
+# Disarankan SALIN langkah yang dibutuhkan ke human_interaction.yaml.
+# Jalankan alternatif: bash scripts/start_full_keyboard.sh --human-config config/human_interaction_examples.yaml
+# M simpan default OMS -> START jalankan -> E/X atau STOP fisik batalkan.
+start_pose: {x: 0.0, y: 0.0, yaw_deg: 0.0}
+calibration:
+  # Wajib isi hasil ukur; START menolak seluruh misi jika masih null.
+  lift_cm_per_rev: null
+  rotate_deg_per_rev: null
+  lift_positive_duty_sign: -1
+  rotate_positive_duty_sign: -1
+settings:
+  linear_speed_mps: 0.15
+  angular_speed_rps: 0.5
+  front_stop_cm: 8
+  rotate_duty_percent: 33.3
+  slide_duty_percent: 15
+servo_positions:
+  # left_value/right_value dibaca dari keyboard_servos.yaml hasil kalibrasi.
+  wrist: {"on": left_value, "off": right_value}
+  gripper: {"on": left_value, "off": right_value}
+mission:
+  # Lampu merah terus menyala sambil langkah berikutnya berjalan.
+  - action: light
+    color: red
+    mode: steady
+
+  # goto = menuju koordinat absolut x/y, relatif frame start_pose (meter).
+  - action: goto
+    x: 1.0
+    y: 0.5
+    speed_mps: 0.15
+    timeout_s: 30
+
+  # Maju sampai LiDAR depan <= 10 cm; scan, odom, IMU harus segar.
+  - action: forward
+    until: {lidar_front_cm: 10}
+    speed_mps: 0.08
+    timeout_s: 20
+
+  # Maju lurus sejauh 100 cm menurut odometry (jarak lintasan, bukan koordinat).
+  - action: forward
+    until: {travel_cm: 100}
+    timeout_s: 30
+
+  # Trace = mengikuti dinding; pertahankan jarak samping 30 cm.
+  - action: trace
+    side: right
+    wall_distance_cm: 30
+    until: {travel_cm: 100}
+    timeout_s: 30
+  - action: trace
+    side: left
+    wall_distance_cm: 30
+    until: {travel_cm: 100}
+    timeout_s: 30
+  - action: trace
+    side: right
+    wall_distance_cm: 30
+    until: {lidar_front_cm: 10}
+    speed_mps: 0.08
+    timeout_s: 30
+  - action: trace
+    side: left
+    wall_distance_cm: 30
+    until: {lidar_front_cm: 10}
+    speed_mps: 0.08
+    timeout_s: 30
+
+  # Heading absolut; 0/90/180 terhadap frame start_pose, positif berlawanan jarum jam.
+  - {action: heading, angle_deg: 0, timeout_s: 15}
+  - {action: heading, angle_deg: 90, timeout_s: 15}
+  - {action: heading, angle_deg: 180, timeout_s: 15}
+  # Turn relatif arah sekarang; mendukung putaran >180 tanpa mengambil jalan pintas.
+  - {action: turn, direction: right, angle_deg: 90, timeout_s: 15}
+  - {action: turn, direction: left, angle_deg: 90, timeout_s: 15}
+
+  # Vx meter/detik; negatif mundur (memerlukan LiDAR belakang valid).
+  - {action: robot_move, vx_mps: 0.15, duration_s: 2, timeout_s: 5}
+  - {action: robot_movetheta, angle_deg: 0, timeout_s: 15}
+
+  # OMS relatif: negatif kanan, positif kiri; duty langsung tanpa PID/boost.
+  - {action: oms_rotate, angle_deg: -90, timeout_s: 15}
+  - {action: oms_rotate, angle_deg: 90, timeout_s: 15}
+  - {action: oms_rotate, target: default, timeout_s: 15}
+
+  # Lift cm relatif; memakai PID RPM keyboard tanpa boost.
+  - {action: lift, delta_cm: 20, timeout_s: 20}
+  - {action: lift, delta_cm: -10, timeout_s: 20}
+  - {action: lift, target: default, timeout_s: 20}
+
+  # Slide open-loop: nilai delay DETIK; duty bertanda ditentukan direction.
+  - {action: slide, direction: forward, duration_s: 10, duty_percent: 15, timeout_s: 15}
+  - {action: slide, direction: backward, duration_s: 10, duty_percent: 15, timeout_s: 15}
+
+  # ON/OFF WAJIB dikutip agar YAML membaca string. Ini posisi, bukan daya.
+  # settle_s waktu tunggu setelah service menerima perintah, bukan feedback fisik.
+  - {action: wrist, position: "on", settle_s: 1}
+  - {action: wrist, position: "off", settle_s: 1}
+  - {action: wrist, position: default, settle_s: 1}
+  - {action: gripper, position: "on", settle_s: 1}
+  - {action: gripper, position: "off", settle_s: 1}
+  # Jangan memakai gripper default ketika sedang membawa objek.
+  - {action: gripper, position: default, settle_s: 1}
+
+  # Kamera diam; colour harus sama dengan nama profil HSV yang diaktifkan.
+  # Rectangle = bentuk 2D kontur, bukan pengenalan cuboid 3D.
+  # on_not_found continue melanjutkan saat TIMEOUT; sensor stale tetap ERROR.
+  - action: detect_camera
+    colour: kuning
+    timeout_s: 10
+    save_as: warna_target
+    on_not_found: continue
+  - action: detect_camera
+    colour: kuning
+    shape: rectangle
+    timeout_s: 10
+    save_as: objek_target
+    on_not_found: stop
+
+  - {action: light, color: green, mode: blink}
+  - {action: wait, seconds: 2}
+  - {action: light, color: "off"}
+  # stop mengakhiri misi; langkah sesudahnya tidak dijalankan.
+  - {action: stop}

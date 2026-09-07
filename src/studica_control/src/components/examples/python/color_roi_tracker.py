@@ -18,6 +18,29 @@ from std_msgs.msg import String
 import yaml
 
 
+def contour_shape(contour):
+    """Classify the 2D silhouette; never infer a rectangle from its bounding box."""
+    area = cv2.contourArea(contour)
+    perimeter = cv2.arcLength(contour, True)
+    if area <= 0 or perimeter <= 0:
+        return 'unknown'
+    polygon = cv2.approxPolyDP(contour, .025 * perimeter, True)
+    if len(polygon) == 3 and cv2.isContourConvex(polygon):
+        return 'triangle'
+    if len(polygon) == 4 and cv2.isContourConvex(polygon):
+        points = polygon.reshape(-1, 2).astype(float)
+        for i in range(4):
+            first = points[(i-1) % 4] - points[i]
+            second = points[(i+1) % 4] - points[i]
+            denominator = np.linalg.norm(first) * np.linalg.norm(second)
+            if denominator == 0 or abs(np.dot(first, second)/denominator) > .3:
+                return 'unknown'
+        return 'rectangle'
+    if len(polygon) >= 6 and 4 * np.pi * area / perimeter**2 >= .8:
+        return 'circle'
+    return 'unknown'
+
+
 class ColorProfiles:
     """Validated named HSV ranges and selection, persisted as one atomic file."""
 
@@ -334,6 +357,7 @@ class ColorRoiTracker(Node):
             for contour in contours:
                 if cv2.contourArea(contour) >= self.minimum_area(frame.shape):
                     objects.append({'label': name, 'color': name,
+                                    'shape': contour_shape(contour),
                                     'bbox': list(cv2.boundingRect(contour)),
                                     'hsv_low': item['low'], 'hsv_high': item['high']})
         return objects, combined

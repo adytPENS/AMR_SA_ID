@@ -6,3 +6,37 @@ slide:
   extend_seconds: 0.0
   retract_duty_percent: -40.0
   retract_seconds: 0.0
+
+# Titik koordinat robot saat tombol START ditekan, satuan meter/derajat.
+start_pose: {x: 0.0, y: 0.0, yaw_deg: 0.0}
+
+# Kalibrasi sesuai mekanisme: null berarti belum diukur.
+# Nilai bertanda: jika encoder turun ketika lift naik, cm_per_rev negatif.
+calibration:
+  lift_cm_per_rev: null
+  rotate_deg_per_rev: null
+  lift_positive_duty_sign: -1   # sesuai I/naik pada keyboard
+  rotate_positive_duty_sign: -1 # sesuai J/kiri pada keyboard
+
+settings:
+  linear_speed_mps: 0.15
+  angular_speed_rps: 0.5
+  front_stop_cm: 8
+  rotate_duty_percent: 33.3
+  slide_duty_percent: 15
+
+servo_positions:
+  wrist: {"on": left_value, "off": right_value}
+  gripper: {"on": left_value, "off": right_value}
+
+# Contoh aktif default: hanya lampu, selesai setelah 2 detik.
+# Ganti list ini dengan perintah dari human_interaction_examples.yaml.
+mission:
+  - action: light
+    color: yellow
+    mode: steady
+  - action: wait
+    seconds: 2
+  - action: light
+    color: "off"
+  - action: stop
