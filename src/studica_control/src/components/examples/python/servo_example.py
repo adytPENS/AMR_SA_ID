@@ -1,42 +1,55 @@
 #!/usr/bin/env python3
-"""Servo — read current angle and command a new angle.
+"""Servo standard — read current angle and command a new angle.
 
-Run:  python3 servo_example.py
-Requires: studica_launch.py running, servo enabled in params.yaml
+Run:  python3 servo_example.py --sensor test_servo --angle 90
+Requires: studica_launch.py running, a standard servo enabled in the params file
 
-Topic:   subscribes to 'servo_angle' (std_msgs/Float32) — set servo.<sensor>.topic: servo_angle in params.yaml
-Service: '/<sensor_name>/set_servo_angle' (SetData) — sensor name 'servo' sets the prefix
-  Command: pass the target angle as the 'params' string (e.g. "90")
+Topic:   subscribes to '/<sensor>/state' (std_msgs/Float64)
+Service: '/<sensor>/set_servo' (SetData)
+    Command: pass the target angle in 'initparams.speed' (e.g. 90)
 """
+import argparse
+
 import rclpy
 from rclpy.node import Node
-from std_msgs.msg import Float32
+from std_msgs.msg import Float64
 from studica_control.srv import SetData
 
 
 class ServoExample(Node):
-    def __init__(self):
+    def __init__(self, sensor, angle):
         super().__init__('servo_example')
-        self.sub = self.create_subscription(Float32, 'servo_angle', self.on_angle, 10)
-        self.client = self.create_client(SetData, '/servo/set_servo_angle')
-        self.get_logger().info('Listening on servo_angle topic...')
+        self.angle = angle
+        self.sub = self.create_subscription(
+            Float64, f'/{sensor}/state', self.on_angle, 10)
+        self.client = self.create_client(SetData, f'/{sensor}/set_servo')
+        self.get_logger().info(f'Listening on /{sensor}/state...')
 
     def on_angle(self, msg):
         self.get_logger().info(f'Current angle: {msg.data}')
 
     def set_angle(self, degrees):
         req = SetData.Request()
-        req.params = str(degrees)
+        req.initparams.speed = float(degrees)
         future = self.client.call_async(req)
-        future.add_done_callback(
-            lambda f: self.get_logger().info(f'set_angle: {f.result().message}'))
+        future.add_done_callback(self.on_set_angle)
+
+    def on_set_angle(self, future):
+        try:
+            self.get_logger().info(f'set_angle: {future.result().message}')
+        except Exception as error:
+            self.get_logger().error(f'set_angle failed: {error}')
 
 
 def main():
+    parser = argparse.ArgumentParser(description='Test a standard servo')
+    parser.add_argument('--sensor', default='servo')
+    parser.add_argument('--angle', type=float, default=90.0)
+    args = parser.parse_args()
+
     rclpy.init()
-    node = ServoExample()
-    # Example: move to 90 degrees after 2 seconds
-    node.create_timer(2.0, lambda: node.set_angle(90))
+    node = ServoExample(args.sensor, args.angle)
+    node.create_timer(2.0, lambda: node.set_angle(node.angle))
     rclpy.spin(node)
     rclpy.shutdown()
 

@@ -1,0 +1,12 @@
+names:
+- Shape
+nc: 1
+roboflow:
+  license: CC BY 4.0
+  project: setshapes
+  url: https://universe.roboflow.com/tel-aviv/setshapes/dataset/1
+  version: 1
+  workspace: tel-aviv
+test: ../test/images
+train: /content/SetShapes-11/train/images
+val: /content/SetShapes-11/valid/images

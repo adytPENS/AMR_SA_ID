@@ -26,6 +26,9 @@
   <depend>lifecycle_msgs</depend>
   <depend>nav_msgs</depend>
   <depend>rclcpp</depend>
+  <depend>rclcpp_action</depend>
+  <depend>rcutils</depend>
+  <depend>rosidl_typesupport_c</depend>
   <depend>rclcpp_components</depend>
   <depend>sensor_msgs</depend>
   <depend>std_msgs</depend>
@@ -33,6 +36,11 @@
   <depend>tf2_ros</depend>
 
   <exec_depend>slam_toolbox</exec_depend>
+  <exec_depend>rclpy</exec_depend>
+  <exec_depend>ament_index_python</exec_depend>
+  <exec_depend>launch</exec_depend>
+  <exec_depend>launch_ros</exec_depend>
+  <exec_depend>rmw_cyclonedds_cpp</exec_depend>
   <exec_depend>nav2_bringup</exec_depend>
   <exec_depend>nav2_msgs</exec_depend>
   <exec_depend>orbbec_camera</exec_depend>

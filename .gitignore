@@ -66,3 +66,12 @@ libstudica_drivers.so
 # ignore executables in drivers folder
 # drivers/examples/*[^.]*
 !Makefile
+
+# Local Python environments and test caches
+.venv*/
+__pycache__/
+.pytest_cache/
+
+# Generated USB packages; regenerate with scripts/create_usb_deployment.py
+/deployment/STUDICA_VMX_USB/
+/deployment/STUDICA_VMX_USB.zip

@@ -10,5 +10,22 @@ color_roi_tracker:
     hsv_margin_s: 25
     hsv_margin_v: 25
     calibration_file: /home/vmx/studica_ws/config/color_object_1_hsv.yaml
+    # Empty = color_profiles.yaml beside calibration_file. Contains named ranges
+    # and checkbox state; saved by the GUI. The original calibration stays intact.
+    profiles_file: ""
     load_saved_calibration: true
     jpeg_quality: 75
+    # Resize in the detector; keep the aligned RGB/depth capture profile unchanged.
+    processing_width: 320
+    processing_rate_hz: 30.0
+    # Independent depth sampling; keep RGB responsive and GUI load bounded.
+    depth_processing_rate_hz: 10.0
+    display_rate_hz: 10.0
+    # Starting thresholds for multi-color mode; tune under actual arena lighting.
+    # H: 0..179, S/V: 0..255. Red wraps around H=179/0.
+    red_low: [170, 80, 50]
+    red_high: [10, 255, 255]
+    green_low: [35, 60, 40]
+    green_high: [85, 255, 255]
+    blue_low: [95, 80, 40]
+    blue_high: [130, 255, 255]

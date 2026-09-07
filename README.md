@@ -1,5 +1,10 @@
 # Studica Robotics ROS2 Driver
 
+USB installer: [English deployment kit](deployment/README.md).
+
+Setup VMX baru / transfer workspace: [Panduan instalasi lengkap Bahasa Indonesia](docs/VMX_STANDARD_SETUP_ID.md).
+Pemeriksaan awal tanpa mengubah sistem: `bash scripts/check_vmx_setup.sh`.
+
 A ROS2 hardware abstraction layer for the **Studica Robotics VMX** platform. Each hardware component — motor controllers, sensors, servos, encoders, and gamepad input — is an independently configurable ROS2 node. Enable only what your robot uses; everything else stays off.
 
 **Repository:** https://github.com/Studica-Robotics/ROS2

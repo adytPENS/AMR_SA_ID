@@ -1,0 +1,8 @@
+# Acuan slide adalah posisi yang diatur manual sebelum M ditekan.
+# Durasi 0 menonaktifkan langkah hingga disetel pada mekanisme sebenarnya.
+slide:
+  mode: timed
+  extend_duty_percent: 40.0
+  extend_seconds: 0.0
+  retract_duty_percent: -40.0
+  retract_seconds: 0.0

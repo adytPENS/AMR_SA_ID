@@ -6,7 +6,7 @@ coordinate_mode: local
 # `control` adalah cara bergerak DARI titik sebelumnya MENUJU titik ini.
 # Kalibrasikan koordinat ini terhadap arena sebelum pengujian cepat.
 waypoints:
-  P1: {x: 1.43, y: 0.00, control: odometry}
+  P1: {x: 1.43, y: 0.00, control: odometry, arrival: front_wall, front_arrival_distance: 0.15}
   # Langkah belok tidak memerlukan x/y; yaw target diambil relatif dari IMU.
   T1: {control: turn_left_90}
   # Mode lain yang tersedia untuk titik belok:
@@ -26,11 +26,11 @@ waypoints:
   P4: {x: 1.43, y: 3.50, control: trace_left, wall_distance: 0.40, arrival: coordinate_or_front_wall, front_arrival_distance: 0.15}
   P5: {x: 1.00, y: 0.50, control: odometry}
   A:  {x: 0.00, y: 0.68, control: odometry, arrival: coordinate_or_front_wall, front_arrival_distance: 0.15}
-  C:  {x: 1.29, y: 0.68, control: odometry, arrival: coordinate_or_front_wall, front_arrival_distance: 0.15}
+  C:  {x: 1.29, y: 0.68, control: odometry}
   S:  {x: 0.00, y: 0.00, control: trace_left, wall_distance: 0.40, arrival: coordinate_or_front_wall, front_arrival_distance: 0.15}
   
 
-sequence: [P1, P3, B, P4, P6, P5, A, C, P1, S]
+sequence: [P1, P3, B, P4, P6, A, C, P1, S]
 
 start_button:
   enabled: true

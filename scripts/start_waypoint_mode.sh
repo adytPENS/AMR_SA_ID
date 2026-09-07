@@ -7,6 +7,7 @@ ODOM_NODE="$PROJECT_ROOT/src/studica_control/src/components/examples/python/whee
 ODOM_PARAMS="$PROJECT_ROOT/src/studica_control/config/wheel_odometry.yaml"
 DEFAULT_NAV_NODE="$PROJECT_ROOT/src/studica_control/src/components/examples/python/waypoint_navigator.py"
 HYBRID_NAV_NODE="$PROJECT_ROOT/src/studica_control/src/components/examples/python/hybrid_corridor_navigator.py"
+RIGHT_WALL_NAV_NODE="$PROJECT_ROOT/src/studica_control/src/components/examples/python/right_wall_navigator.py"
 DRIVE_NODE="$PROJECT_ROOT/src/studica_control/src/components/examples/python/drive_controller.py"
 DRIVE_CONFIG="$PROJECT_ROOT/src/studica_control/config/drive_controller.yaml"
 WAYPOINTS="${1:-$PROJECT_ROOT/src/studica_control/config/waypoints.yaml}"
@@ -21,6 +22,8 @@ PY
 )"
 if [[ "$NAVIGATOR_TYPE" == "hybrid_corridor" ]]; then
   NAV_NODE="$HYBRID_NAV_NODE"
+elif [[ "$NAVIGATOR_TYPE" == "right_wall" ]]; then
+  NAV_NODE="$RIGHT_WALL_NAV_NODE"
 else
   NAV_NODE="$DEFAULT_NAV_NODE"
 fi

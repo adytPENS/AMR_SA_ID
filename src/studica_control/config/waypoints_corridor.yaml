@@ -14,7 +14,7 @@ waypoints:
   P4: {x: 1.37, y: 3.4, arrival: odometry_or_lidar}
   S: {x: 0.00, y: 0.00, arrival: odometry_or_lidar}
 
-sequence: [P1, P4, B, P4, P3, A, C, P1, S]
+sequence: [P1, C, A, P3, P4, B, P4, P1, S]
 
 start_button:
   enabled: true
@@ -41,7 +41,7 @@ motion:
   lidar_arrival_distance: 0.30
   turn_tolerance_deg: 8.0
   drive_heading_limit_deg: 25.0
-  turn_timeout: 10.0
+  turn_timeout: 10.0 # YELLOW FLASHING
   waypoint_pause_seconds: 5.2
   transit_prefixes: [P]
 
@@ -66,3 +66,4 @@ obstacle_avoidance:
   progress_margin: 0.15
   leave_clear_time: 0.60
   wall_follow_timeout: 45.0
+# bash scripts/start_full_waypoint.sh src/studica_control/config/waypoints_corridor.yaml

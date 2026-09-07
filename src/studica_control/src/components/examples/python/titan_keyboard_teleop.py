@@ -2,18 +2,24 @@
 """Keyboard AMR dan OMS: /cmd_vel base serta motor Titan kedua."""
 
 import argparse
+import math
 import select
 import sys
 import termios
 import time
 import tty
+from pathlib import Path
+import yaml
 from dataclasses import dataclass
 from typing import Optional
 
 import rclpy
 from geometry_msgs.msg import Twist
 from rclpy.node import Node
-from std_msgs.msg import Float64
+from std_msgs.msg import Bool, Float64, String
+from human_interaction import HumanInteraction
+from studica_control.srv import SetData
+from yellow_follow_keyboard import YellowFollower
 
 
 def clamp(value: float, lower: float, upper: float) -> float:
@@ -70,9 +76,116 @@ class OmsRpmPid:
         return (1.0 if direction > 0.0 else -1.0) * magnitude
 
 
+@dataclass
+class StandardServoJog:
+    """Ramp target posisi, bukan feedback posisi fisik servo."""
+
+    minimum: float = -150.0
+    maximum: float = 150.0
+    initial: float = 0.0
+    target: Optional[float] = None
+    last_sent: Optional[float] = None
+
+    def observe(self, value: float) -> None:
+        # Driver publishes min-1 (-151) until its first successful command.
+        if (self.target is None and math.isfinite(value) and
+                self.minimum <= value <= self.maximum):
+            self.target = float(value)
+            self.last_sent = float(round(value))
+
+    def initialize(self) -> Optional[float]:
+        if self.target is not None:
+            return None
+        self.target = self.initial
+        self.last_sent = float(round(self.initial))
+        return self.last_sent
+
+    def jog(self, rate: float, dt: float) -> Optional[float]:
+        if rate == 0.0:
+            return None  # Idle/stop must never command the centre position.
+        if self.target is None:
+            raise RuntimeError('Tekan P untuk posisi awal servo standard dahulu')
+        self.target = clamp(self.target + rate * clamp(dt, 0.0, 0.05),
+                            self.minimum, self.maximum)
+        value = float(round(self.target))
+        if value == self.last_sent:
+            return None
+        self.last_sent = value
+        return value
+
+
+class ServoServiceCommand:
+    """Send the latest target through the same service as servo_example.py.
+
+    One request per servo in flight; intermediate jog targets are coalesced.
+    Failed requests retain their target and retry without blocking keyboard STOP.
+    """
+    def __init__(self, client, logger, name):
+        self.client = client
+        self.logger = logger
+        self.name = name
+        self.target = None
+        self.confirmed = None
+        self.future = None
+        self.sent = None
+        self.next_attempt = 0.0
+
+    def set_target(self, value):
+        self.target = float(value)
+
+    def pump(self, now):
+        if self.future is not None:
+            if not self.future.done():
+                return
+            try:
+                response = self.future.result()
+                if not response.success:
+                    raise RuntimeError(response.message)
+                self.confirmed = self.sent
+            except Exception as error:
+                self.logger.error(f'{self.name}: set_servo gagal: {error}')
+                self.next_attempt = now + 0.5
+            self.future = None
+        if (self.target is None or self.target == self.confirmed or
+                now < self.next_attempt):
+            return
+        self.next_attempt = now + 0.05
+        if not self.client.service_is_ready():
+            self.logger.warning(f'{self.name}: menunggu service set_servo')
+            self.next_attempt = now + 1.0
+            return
+        request = SetData.Request()
+        request.initparams.speed = self.target
+        try:
+            self.future = self.client.call_async(request)
+            self.sent = self.target
+        except Exception as error:
+            self.logger.error(f'{self.name}: set_servo gagal: {error}')
+            self.next_attempt = now + 0.5
+
+
 class KeyboardCmdVel(Node):
     def __init__(self, sensor: str, oms_sensor: str, args) -> None:
         super().__init__('keyboard_cmd_vel')
+        human_config = {}
+        if args.human_config:
+            with Path(args.human_config).open(encoding='utf-8') as stream:
+                human_config = yaml.safe_load(stream) or {}
+        self.human = HumanInteraction(args.oms_default_file, time.monotonic,
+                                      slide=human_config.get('slide'))
+        self.human_status = self.create_publisher(String, '/human_interaction/status', 10)
+        self.human_last_status = None
+        for name, motor in (('lift', 2), ('rotate', 3)):
+            self.create_subscription(
+                Float64, f'/{oms_sensor}/m_{motor}/encoder',
+                lambda msg, name=name: self.human.observe(name, msg.data), 10)
+        for name in ('start', 'stop'):
+            self.create_subscription(
+                Bool, f'/{name}_button/state',
+                lambda msg, name=name: self.human.button(name, not msg.data), 10)
+        self.yellow_follower = YellowFollower()
+        self.create_subscription(
+            String, '/color_tracker/result', self.yellow_follower.result_callback, 1)
         self.cmd_publisher = self.create_publisher(Twist, '/cmd_vel', 10)
         self.oms_lift_publisher = self.create_publisher(
             Float64, f'/{oms_sensor}/m_2/cmd', 10)
@@ -80,10 +193,28 @@ class KeyboardCmdVel(Node):
             Float64, f'/{oms_sensor}/m_3/cmd', 10)
         self.slide_publisher = self.create_publisher(
             Float64, '/oms_slide/cmd', 10)
-        self.wrist_publisher = self.create_publisher(
-            Float64, '/oms_wrist/cmd', 10)
-        self.gripper_publisher = self.create_publisher(
-            Float64, '/oms_gripper/cmd', 10)
+        self.servo_commands = {
+            name: ServoServiceCommand(
+                self.create_client(SetData, f'/oms_{name}/set_servo'),
+                self.get_logger(), name)
+            for name in ('wrist', 'gripper')
+        }
+        self.standard_servos = {
+            name: StandardServoJog(
+                getattr(args, f'{name}_min_angle'),
+                getattr(args, f'{name}_max_angle'),
+                getattr(args, f'{name}_start_angle'))
+            for name in ('wrist', 'gripper')
+        }
+        self.servo_positions = args.servo_positions
+        self.servo_waiting = set()
+        self.servo_subscriptions = [
+            self.create_subscription(
+                Float64, f'/oms_{name}/state',
+                lambda msg, name=name: self.standard_servos[name].observe(msg.data),
+                10)
+            for name in self.standard_servos
+        ]
         self.encoder_values = [None] * 4
         self.encoder_subscriptions = [
             self.create_subscription(
@@ -124,34 +255,66 @@ class KeyboardCmdVel(Node):
         self.oms_lift_publisher.publish(Float64(data=float(lift)))
         self.oms_rotate_publisher.publish(Float64(data=float(rotate)))
 
-    def publish_continuous_servos(
-            self, slide: float, wrist: float, gripper: float = 0.0) -> None:
+    def command_servo_position(self, key):
+        name, value = self.servo_positions[key]
+        servo = self.standard_servos[name]
+        servo.target = value
+        servo.last_sent = value
+        self.servo_commands[name].set_target(value)
+        self.get_logger().info(f'{key.upper()}: {name} target={value:g} derajat')
+
+    def initialize_standard_servos(self) -> None:
+        for name, servo in self.standard_servos.items():
+            value = servo.initialize()
+            if value is not None:
+                self.servo_commands[name].set_target(value)
+                self.get_logger().info(f'{name}: posisi awal {value:.0f} derajat')
+
+    def publish_servos(
+            self, slide: float, wrist: float = 0.0, gripper: float = 0.0,
+            dt: float = 0.0) -> None:
         self.slide_publisher.publish(Float64(data=float(slide)))
-        self.wrist_publisher.publish(Float64(data=float(wrist)))
-        self.gripper_publisher.publish(Float64(data=float(gripper)))
+        for name, rate in (('wrist', wrist), ('gripper', gripper)):
+            servo = self.standard_servos[name]
+            if rate != 0.0 and servo.target is None:
+                value = servo.initialize()
+                self.get_logger().info(
+                    f'{name}: inisialisasi target {value:.0f} derajat')
+            else:
+                value = servo.jog(rate, dt)
+            if value is not None:
+                self.servo_commands[name].set_target(value)
+            self.servo_commands[name].pump(time.monotonic())
 
     def stop(self) -> None:
         for _ in range(5):
             self.publish_cmd(0.0, 0.0)
             self.publish_oms(0.0, 0.0)
-            self.publish_continuous_servos(0.0, 0.0, 0.0)
+            self.publish_servos(0.0)
             rclpy.spin_once(self, timeout_sec=0.02)
 
 
 def parse_args():
     parser = argparse.ArgumentParser(description='Keyboard /cmd_vel AMR')
+    parser.add_argument('--servo-config', default=None,
+                        help='YAML left_value/right_value wrist dan eof (derajat)')
+    parser.add_argument('--human-config', default=None,
+                        help='YAML konfigurasi mode human interaction')
+    parser.add_argument('--oms-default-file', default='config/oms_default.json',
+                        help='file posisi default OMS yang disimpan saat M')
     parser.add_argument('--sensor', default='titan0')
     parser.add_argument('--oms-sensor', default='titan1')
     parser.add_argument('--oms-speed', type=float, default=0.20)
     parser.add_argument('--lift-speed', type=float, default=None)
-    parser.add_argument('--rotate-speed', type=float, default=None)
+    parser.add_argument('--rotate-speed', '--rotate-duty', type=float, default=33.3,
+                        help='duty putar OMS J/L langsung, 0..100 persen (tanpa PID)')
     parser.add_argument('--oms-pid', action=argparse.BooleanOptionalAction,
                         default=True)
     parser.add_argument('--lift-rpm', type=float, default=None,
                         help='override target naik dan turun sekaligus')
-    parser.add_argument('--lift-up-rpm', type=float, default=40.0)
-    parser.add_argument('--lift-down-rpm', type=float, default=25.0)
-    parser.add_argument('--rotate-rpm', type=float, default=35.0)
+    parser.add_argument('--lift-up-rpm', type=float, default=30.0)
+    parser.add_argument('--lift-down-rpm', type=float, default=30.0)
+    parser.add_argument('--rotate-rpm', type=float, default=15.0)
     parser.add_argument('--lift-max-rpm', type=float, default=100.0)
     parser.add_argument('--rotate-max-rpm', type=float, default=227.0)
     parser.add_argument('--oms-pid-kp', type=float, default=0.004)
@@ -165,8 +328,15 @@ def parse_args():
     parser.add_argument('--rotate-boost-duty', type=float, default=0.60)
     parser.add_argument('--rotate-boost-time', type=float, default=0.25)
     parser.add_argument('--slide-speed', type=float, default=40.0)
-    parser.add_argument('--wrist-speed', type=float, default=25.0)
-    parser.add_argument('--gripper-speed', type=float, default=15.0)
+    parser.add_argument('--wrist-speed', type=float, default=25.0,
+                        help='laju perubahan target posisi, derajat/detik')
+    parser.add_argument('--gripper-speed', type=float, default=15.0,
+                        help='laju perubahan target posisi, derajat/detik')
+    for name in ('wrist', 'gripper'):
+        parser.add_argument(f'--{name}-min-angle', type=int, default=-150)
+        parser.add_argument(f'--{name}-max-angle', type=int, default=150)
+        parser.add_argument(f'--{name}-start-angle', type=int, default=0,
+                            help='posisi awal saat P ditekan; kalibrasi mekanisme')
     parser.add_argument('--slide-polarity', type=float, choices=(-1.0, 1.0),
                         default=1.0)
     parser.add_argument('--wrist-polarity', type=float, choices=(-1.0, 1.0),
@@ -193,12 +363,11 @@ def parse_args():
         parser.error('--oms-speed harus 0.05..0.60 duty')
     args.lift_speed = (
         args.oms_speed if args.lift_speed is None else args.lift_speed)
-    args.rotate_speed = (
-        args.oms_speed if args.rotate_speed is None else args.rotate_speed)
     if not 0.05 <= args.lift_speed <= 0.60:
         parser.error('--lift-speed harus 0.05..0.60 duty')
-    if not 0.05 <= args.rotate_speed <= 0.60:
-        parser.error('--rotate-speed harus 0.05..0.60 duty')
+    if not 0.0 <= args.rotate_speed <= 100.0:
+        parser.error('--rotate-speed / --rotate-duty harus 0..100 persen')
+    args.rotate_speed /= 100.0
     if args.lift_rpm is not None:
         if not 5.0 <= args.lift_rpm <= args.lift_max_rpm:
             parser.error('--lift-rpm harus 5 sampai --lift-max-rpm')
@@ -226,8 +395,39 @@ def parse_args():
         parser.error('--wrist-speed harus 1..100')
     if not 1.0 <= args.gripper_speed <= 100.0:
         parser.error('--gripper-speed harus 1..100')
+    for name in ('wrist', 'gripper'):
+        lower = getattr(args, f'{name}_min_angle')
+        upper = getattr(args, f'{name}_max_angle')
+        initial = getattr(args, f'{name}_start_angle')
+        if not -150 <= lower < upper <= 150:
+            parser.error(f'--{name}-min/max-angle harus -150..150 dan min < max')
+        if not lower <= initial <= upper:
+            parser.error(f'--{name}-start-angle harus di antara min/max-angle')
     if not 0.05 <= args.distance <= 5.0:
         parser.error('--distance harus 0.05..5.0 meter')
+    # Standalone fallback matches the shipped YAML; launcher supplies its path.
+    positions = {'wrist': {'left_value': 30.0, 'right_value': -30.0},
+                 'eof': {'left_value': 30.0, 'right_value': -30.0}}
+    if args.servo_config:
+        try:
+            with Path(args.servo_config).open(encoding='utf-8') as stream:
+                positions = yaml.safe_load(stream)
+        except (OSError, yaml.YAMLError) as error:
+            parser.error(f'--servo-config: {error}')
+    args.servo_positions = {}
+    for key, section, field, name in (
+            ('r', 'wrist', 'left_value', 'wrist'),
+            ('t', 'wrist', 'right_value', 'wrist'),
+            ('y', 'eof', 'left_value', 'gripper'),
+            ('u', 'eof', 'right_value', 'gripper')):
+        try:
+            value = float(positions[section][field])
+        except (KeyError, TypeError, ValueError):
+            parser.error(f'--servo-config perlu angka {section}.{field}')
+        if not (getattr(args, f'{name}_min_angle') <= value <=
+                getattr(args, f'{name}_max_angle')):
+            parser.error(f'{section}.{field} di luar batas sudut {name}')
+        args.servo_positions[key] = (name, value)
     return args
 
 
@@ -243,23 +443,20 @@ def main() -> None:
         'd': (0.0, -args.angular_speed),
     }
     oms_commands = {
-        'i': (args.lift_speed * args.lift_polarity, 0.0),       # naik
-        'k': (-args.lift_speed * args.lift_polarity, 0.0),      # turun
-        'j': (0.0, args.rotate_speed * args.rotate_polarity),   # CCW
-        'l': (0.0, -args.rotate_speed * args.rotate_polarity),  # CW
+        'i': (-args.lift_speed * args.lift_polarity, 0.0),       # naik
+        'k': (args.lift_speed * args.lift_polarity, 0.0),      # turun
+        'j': (0.0, -args.rotate_speed * args.rotate_polarity),   # CCW
+        'l': (0.0, args.rotate_speed * args.rotate_polarity),  # CW
     }
-    continuous_servo_commands = {
+    servo_commands = {
         'g': (args.slide_speed * args.slide_polarity, 0.0, 0.0),
         'h': (-args.slide_speed * args.slide_polarity, 0.0, 0.0),
-        'r': (0.0, args.wrist_speed * args.wrist_polarity, 0.0),
-        't': (0.0, -args.wrist_speed * args.wrist_polarity, 0.0),
-        'y': (0.0, 0.0, args.gripper_speed * args.gripper_polarity),
-        'u': (0.0, 0.0, -args.gripper_speed * args.gripper_polarity),
     }
     active_key = None
     active_key_started = 0.0
     last_key_time = 0.0
     last_label = None
+    auto_follow = False
     distance_active = False
     distance_start = None
     distance_started = 0.0
@@ -267,36 +464,65 @@ def main() -> None:
     try:
         tty.setcbreak(sys.stdin.fileno())
         node.get_logger().info(
-            'BASE: W maju | S mundur | A kiri | D kanan')
+            'BASE: W maju | S mundur | A kiri | D kanan | Z follow kuning | E/X stop | M simpan OMS + READY')
         node.get_logger().info(
             'OMS: I naik | K turun | J CCW | L CW | E stop semua | Q keluar')
         node.get_logger().info(
-            'SERVO: G/H pin18 | R/T pin19 | Y/U pin20')
+            'SERVO: G/H slide | R/T wrist left/right YAML | Y/U EoF left/right YAML')
+        node.get_logger().warning(
+            f'P = inisialisasi servo tanpa target: wrist={args.wrist_start_angle}, '
+            f'gripper={args.gripper_start_angle} derajat. '
+            'R/T dan Y/U langsung menuju target sudut dari YAML. '
+            'Dapat langsung bergerak ke posisi awal. '
+            'E/tombol dilepas mempertahankan target, bukan melepas daya servo.')
         node.get_logger().info(
             f'/cmd_vel linear={args.linear_speed:.2f}m/s, '
             f'angular={args.angular_speed:.2f}rad/s')
         node.get_logger().info(
             f'OMS lift duty={args.lift_speed:.2f}, '
-            f'rotate duty={args.rotate_speed:.2f}')
+            f'rotate duty={args.rotate_speed * 100:.1f}% (langsung, tanpa PID)')
         if args.oms_pid:
             node.get_logger().info(
                 f'OMS PID software: lift naik={args.lift_up_rpm:.0f}, '
                 f'turun={args.lift_down_rpm:.0f}/'
-                f'{args.lift_max_rpm:.0f} RPM, rotate={args.rotate_rpm:.0f}/'
-                f'{args.rotate_max_rpm:.0f} RPM')
+                f'{args.lift_max_rpm:.0f} RPM')
         wait_until = time.monotonic() + 1.0
         while time.monotonic() < wait_until:
             node.publish_cmd(0.0, 0.0)
             node.publish_oms(0.0, 0.0)
-            node.publish_continuous_servos(0.0, 0.0, 0.0)
+            node.publish_servos(0.0)
             rclpy.spin_once(node, timeout_sec=0.02)
 
+        previous_time = time.monotonic()
         while rclpy.ok():
             now = time.monotonic()
+            dt = now - previous_time
+            previous_time = now
             readable, _, _ = select.select([sys.stdin], [], [], 0.02)
             if readable:
                 key = sys.stdin.read(1).lower()
-                if key in key_commands and not distance_active:
+                if node.human.stop_pressed and key != 'q':
+                    key = 'e'
+                if node.human.owns_control and key not in ('m', 'e', 'x', 'q'):
+                    key = ''
+                if (key in key_commands or key in oms_commands or
+                        key in servo_commands or key in args.servo_positions or
+                        key in ('e', 'x', 'p')):
+                    auto_follow = False
+                if key == 'm':
+                    auto_follow = False
+                    active_key = None
+                    distance_active = False
+                    node.lift_pid.reset()
+                    node.stop()
+                    node.human.capture()
+                elif key == 'z':
+                    auto_follow = not auto_follow
+                    active_key = None
+                    distance_active = False
+                    node.stop()
+                    node.get_logger().info(f'Follow kuning: {auto_follow}')
+                elif key in key_commands and not distance_active:
                     if key != active_key:
                         active_key_started = now
                     active_key = key
@@ -306,20 +532,46 @@ def main() -> None:
                         active_key_started = now
                     active_key = key
                     last_key_time = now
-                elif key in continuous_servo_commands and not distance_active:
+                elif key in args.servo_positions and not distance_active:
+                    active_key = None
+                    node.command_servo_position(key)
+                elif key in servo_commands and not distance_active:
                     if key != active_key:
                         active_key_started = now
                     active_key = key
                     last_key_time = now
-                elif key == 'e':
+                elif key in ('e', 'x'):
+                    node.human.cancel()
                     active_key = None
                     distance_active = False
                     node.stop()
                     last_label = None
                 elif key == 'q':
                     break
+                elif key == 'p':
+                    active_key = None
+                    distance_active = False
+                    node.stop()
+                    node.initialize_standard_servos()
 
-            if distance_active:
+            node.human.tick({name: servo.target for name, servo in
+                             node.standard_servos.items()})
+            status = f'{node.human.state}: {node.human.message}'
+            if status != node.human_last_status:
+                node.get_logger().info(status)
+                node.human_status.publish(String(data=status))
+                node.human_last_status = status
+            if node.human.owns_control or node.human.stop_pressed:
+                auto_follow = False
+                active_key = None
+                distance_active = False
+                node.lift_pid.reset()
+
+            if auto_follow:
+                vx, wz = node.yellow_follower.command()
+                command = (clamp(vx, -args.linear_speed, args.linear_speed),
+                           clamp(wz, -args.angular_speed, args.angular_speed))
+            elif distance_active:
                 distances = [abs(current - start) for current, start in
                              zip(node.encoder_values, distance_start)]
                 progress = sum(distances) / 4.0
@@ -347,24 +599,8 @@ def main() -> None:
                     if args.oms_pid and requested_lift:
                         lift_target = (args.lift_up_rpm if active_key == 'i'
                                        else args.lift_down_rpm)
-                        if (active_key == 'i' and
-                                now - active_key_started < args.lift_up_boost_time):
-                            requested_lift = (
-                                args.lift_up_boost_duty *
-                                (1.0 if requested_lift > 0.0 else -1.0))
-                            node.lift_pid.reset()
-                        else:
-                            requested_lift = node.lift_pid.calculate(
-                                lift_target, requested_lift, now)
-                    if args.oms_pid and requested_rotate:
-                        if now - active_key_started < args.rotate_boost_time:
-                            requested_rotate = (
-                                args.rotate_boost_duty *
-                                (1.0 if requested_rotate > 0.0 else -1.0))
-                            node.rotate_pid.reset()
-                        else:
-                            requested_rotate = node.rotate_pid.calculate(
-                                args.rotate_rpm, requested_rotate, now)
+                        requested_lift = node.lift_pid.calculate(
+                            lift_target, requested_lift, now)
                     oms_command = (requested_lift, requested_rotate)
                 except RuntimeError as error:
                     active_key = None
@@ -372,12 +608,13 @@ def main() -> None:
                         node.get_logger().error(str(error))
                     last_label = 'OMS FEEDBACK ERROR'
             node.publish_oms(*oms_command)
-            continuous_servo_command = (
-                continuous_servo_commands[active_key]
-                if active_key in continuous_servo_commands and not distance_active
+            servo_command = (
+                servo_commands[active_key]
+                if active_key in servo_commands and not distance_active
                 else (0.0, 0.0, 0.0))
-            node.publish_continuous_servos(*continuous_servo_command)
-            label = 'G' if distance_active else (active_key.upper() if active_key else 'STOP')
+            node.publish_servos(*servo_command, dt=dt)
+            label = (node.yellow_follower.status if auto_follow else
+                     ('G' if distance_active else (active_key.upper() if active_key else 'STOP')))
             if label != last_label:
                 node.get_logger().info(label)
                 last_label = label

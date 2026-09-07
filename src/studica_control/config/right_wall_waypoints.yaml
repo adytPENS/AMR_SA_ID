@@ -1,0 +1,90 @@
+# Full trace dinding kanan dengan belok kiri otomatis pada sudut tertutup.
+# Koordinat lokal dihitung dari posisi S dan yaw nol ketika START ditekan.
+navigator: right_wall
+coordinate_mode: local
+
+# CSV dibuat otomatis saat program dijalankan. Setelah STOP, kirim file
+# terbaru untuk dianalisis dan tuning trace berikutnya.
+debug:
+  enabled: true
+  rate_hz: 10.0
+  directory: /home/vmx/studica_ws/logs
+
+# Ganti koordinat A/B/C sesuai lembar court. Seluruh perpindahan memakai
+# trace_right; A/B/C berhenti 5 detik, sedangkan S menandai selesai.
+waypoints:
+  A: {x: 0.00, y: 0.68, control: trace_right, arrival: coordinate, wall_distance: 0.40}
+  B: {x: 0.00, y: 3.37, control: trace_right, arrival: coordinate, wall_distance: 0.40}
+  C: {x: 1.29, y: 0.68, control: trace_right, arrival: coordinate, wall_distance: 0.40}
+  S: {x: 0.00, y: 0.00, control: trace_right, arrival: coordinate, wall_distance: 0.40}
+
+sequence: [A, B, C, S]
+
+start_button:
+  enabled: true
+  topic: /start_button/state
+  active_high: false
+  debounce_ms: 250
+stop_button:
+  enabled: true
+  topic: /stop_button/state
+  active_high: false
+  debounce_ms: 250
+
+motion:
+  linear_speed: 0.30
+  trace_speed: 0.22
+  approach_speed: 0.10
+  angular_speed: 1.60
+  minimum_turn_speed: 0.60
+  heading_kp: 1.80
+  wall_kp: 1.60
+  wall_angle_kp: 0.80
+  # Batasi koreksi agar robot tetap maju dan tidak berputar di tempat.
+  max_trace_turn: 0.40
+  trace_start_grace: 0.80
+  trace_start_max_turn: 0.15
+  wall_visible_distance: 1.20
+  position_tolerance: 0.20
+  approach_radius: 0.40
+  align_tolerance_deg: 7.0
+  front_stop_distance: 0.08
+  front_slow_distance: 0.40
+  scan_timeout: 0.70
+  odom_timeout: 0.60
+
+  # Depan dan kanan dekat berarti sudut tertutup: belok kiri 90 derajat.
+  auto_corner_turn: true
+  # Koordinat hanya menandai area tiba; arah robot mengikuti arah lorong.
+  trace_preserve_heading: true
+  # Hindari area sekitar -80..-90 derajat yang dapat membaca roda robot.
+  right_near_sector_deg: [-58.0, -48.0]
+  right_far_sector_deg: [-74.0, -66.0]
+
+  # Jika dinding kanan hilang: probe maju 40 cm, putar kanan 90, kemudian
+  # maju 40 cm sambil menentukan apakah cukup trace atau perlu U-turn.
+  right_gap_u_turn: true
+  # Hilang 0,25 s memulai probe 40 cm. Selama probe seluruh scan dihitung;
+  # U-turn hanya jika >=65% scan terbuka dan kanan masih kosong di akhir.
+  right_gap_debounce: 0.25
+  right_gap_open_ratio: 0.65
+  right_gap_front_clear: 0.50
+  u_turn_forward_1: 0.40
+  u_turn_cross: 0.40
+  # Setelah belok pertama, dinding harus terlihat pada >=40% scan, masih
+  # terlihat di akhir, dan jaraknya 15..80 cm agar dianggap koridor lanjutan.
+  cross_wall_ratio: 0.40
+  cross_wall_min_distance: 0.15
+  cross_wall_max_distance: 0.80
+  u_turn_forward_2: 0.40
+  u_turn_speed: 0.16
+  maneuver_front_stop_distance: 0.22
+  corner_front_distance: 0.28
+  corner_right_distance: 0.65
+  corner_clear_margin: 0.12
+  turn_tolerance_deg: 6.0
+  turn_settle_time: 0.25
+  turn_timeout: 12.0
+
+  pause_waypoints: [A, B, C]
+  waypoint_pause_seconds: 5.0

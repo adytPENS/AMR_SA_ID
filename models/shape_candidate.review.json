@@ -1,0 +1,13 @@
+{
+  "source": "https://huggingface.co/Oamitai/shape-detection",
+  "file": "shape_candidate.pt",
+  "sha256": "dbe4682e32bc30aff5b2411354e055429d2e6b8fb216bad20bdfcec4417b153f",
+  "bytes": 51552443,
+  "classes": [
+    "Shape"
+  ],
+  "architecture": "yolov9c",
+  "status": "rejected_for_worldskills_shapes",
+  "reason": "One generic Shape class; no cylinder, cuboid or semi-spherical classes. Not loaded into the GUI.",
+  "verification": "Downloaded archive CRC passed; data.yaml and pickle strings inspected without executing checkpoint."
+}

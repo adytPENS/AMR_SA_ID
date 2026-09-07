@@ -1,0 +1,162 @@
+{
+  "version": 3,
+  "profiles": [
+    {
+      "name": "#1",
+      "enabled": false,
+      "low": [
+        1,
+        137,
+        98
+      ],
+      "high": [
+        22,
+        255,
+        255
+      ]
+    },
+    {
+      "name": "#2",
+      "enabled": false,
+      "low": [
+        167,
+        114,
+        81
+      ],
+      "high": [
+        9,
+        243,
+        209
+      ]
+    },
+    {
+      "name": "#3",
+      "enabled": false,
+      "low": [
+        11,
+        133,
+        113
+      ],
+      "high": [
+        29,
+        255,
+        226
+      ]
+    },
+    {
+      "name": "#4",
+      "enabled": false,
+      "low": [
+        167,
+        70,
+        72
+      ],
+      "high": [
+        14,
+        255,
+        208
+      ]
+    },
+    {
+      "name": "orange",
+      "enabled": false,
+      "low": [
+        1,
+        137,
+        164
+      ],
+      "high": [
+        20,
+        237,
+        255
+      ]
+    },
+    {
+      "name": "purple",
+      "enabled": false,
+      "low": [
+        114,
+        78,
+        33
+      ],
+      "high": [
+        135,
+        157,
+        106
+      ]
+    },
+    {
+      "name": "yellow",
+      "enabled": false,
+      "low": [
+        13,
+        176,
+        86
+      ],
+      "high": [
+        32,
+        255,
+        225
+      ]
+    },
+    {
+      "name": "green",
+      "enabled": false,
+      "low": [
+        24,
+        117,
+        58
+      ],
+      "high": [
+        44,
+        255,
+        186
+      ]
+    },
+    {
+      "name": "ob 1",
+      "enabled": true,
+      "low": [
+        167,
+        87,
+        62
+      ],
+      "high": [
+        14,
+        255,
+        199
+      ]
+    },
+    {
+      "name": "ob 2",
+      "enabled": true,
+      "low": [
+        34,
+        21,
+        8
+      ],
+      "high": [
+        58,
+        255,
+        164
+      ]
+    },
+    {
+      "name": "ob 3",
+      "enabled": false,
+      "low": [
+        24,
+        95,
+        60
+      ],
+      "high": [
+        43,
+        255,
+        234
+      ]
+    }
+  ],
+  "objects": [],
+  "model_path": "",
+  "label": "{roi} | circle-{id:03d} | {color} | {shape}"
+}

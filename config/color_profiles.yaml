@@ -1,0 +1,72 @@
+version: 1
+profiles:
+- name: yellow
+  enabled: false
+  low:
+  - 9
+  - 172
+  - 60
+  high:
+  - 31
+  - 255
+  - 235
+- name: green
+  enabled: false
+  low:
+  - 25
+  - 72
+  - 51
+  high:
+  - 45
+  - 246
+  - 223
+- name: red
+  enabled: false
+  low:
+  - 168
+  - 55
+  - 38
+  high:
+  - 10
+  - 255
+  - 233
+- name: red1
+  enabled: false
+  low:
+  - 166
+  - 24
+  - 87
+  high:
+  - 12
+  - 215
+  - 255
+- name: orange
+  enabled: false
+  low:
+  - 2
+  - 27
+  - 102
+  high:
+  - 26
+  - 255
+  - 254
+- name: bblue
+  enabled: false
+  low:
+  - 93
+  - 109
+  - 73
+  high:
+  - 112
+  - 232
+  - 176
+- name: black
+  enabled: true
+  low:
+  - 88
+  - 3
+  - 7
+  high:
+  - 91
+  - 173
+  - 184

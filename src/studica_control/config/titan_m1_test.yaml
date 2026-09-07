@@ -15,7 +15,7 @@ control_server:
     light_tower:
       enabled: false
 
-    # Servo OMS: ketiganya continuous sesuai servo 75002 yang terpasang.
+    # Servo OMS: slide continuous; wrist dan gripper standard (posisi).
     servo:
       enabled: true
       sensors: ["oms_slide", "oms_wrist", "oms_gripper"]
@@ -24,10 +24,10 @@ control_server:
         type: "continuous"
       oms_wrist:
         port: 19
-        type: "continuous"
+        type: "standard"
       oms_gripper:
         port: 20
-        type: "continuous"
+        type: "standard"
 
     # Push START dan STOP active-low pada DIO 10 dan DIO 11.
     dio:

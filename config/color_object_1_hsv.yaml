@@ -1,0 +1,9 @@
+object_label: 'Object #1'
+hsv_low:
+- 9
+- 172
+- 60
+hsv_high:
+- 31
+- 255
+- 235

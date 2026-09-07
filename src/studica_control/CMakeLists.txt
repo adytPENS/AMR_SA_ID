@@ -1,6 +1,22 @@
 cmake_minimum_required(VERSION 3.8)
 project(studica_control)
 
+# Vendor SDKs live outside ROS and cannot be supplied by rosdep.
+foreach(vendor_file IN ITEMS
+  /usr/local/include/vmxpi/VMXPi.h
+  /usr/local/lib/vmxpi/libvmxpi_hal_cpp.so
+  /usr/local/include/studica_drivers/titan.hpp
+  /usr/local/lib/studica_drivers/libstudica_drivers.so
+)
+  if(NOT EXISTS "${vendor_file}")
+    message(FATAL_ERROR
+      "Missing VMX/Studica SDK file: ${vendor_file}. "
+      "Install the Studica VMX HAL and build/install drivers/ first. "
+      "See docs/VMX_STANDARD_SETUP_ID.md in the workspace. "
+      "Run colcon as your normal user, not with sudo.")
+  endif()
+endforeach()
+
 if(CMAKE_COMPILER_IS_GNUCXX OR CMAKE_CXX_COMPILER_ID MATCHES "Clang")
   add_compile_options(-Wall -Wextra -Wpedantic)
 endif()
@@ -247,6 +263,7 @@ set(python_example_scripts
   src/components/examples/python/waypoint_navigator.py
   src/components/examples/python/imu_example.py
   src/components/examples/python/servo_example.py
+  src/components/examples/python/servo_calibration.py
   src/components/examples/python/ultrasonic_example.py
   src/components/examples/python/sharp_example.py
   src/components/examples/python/encoder_example.py
@@ -258,6 +275,8 @@ set(python_example_scripts
   src/components/examples/python/rgbd_object_detector.py
   src/components/examples/python/local_detection_viewer.py
   src/components/examples/python/color_roi_tracker.py
+  src/components/examples/python/human_interaction.py
+  src/components/examples/python/yellow_follow_keyboard.py
 )
 
 install(PROGRAMS ${python_example_scripts}

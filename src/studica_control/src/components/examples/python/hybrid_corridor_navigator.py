@@ -2,9 +2,11 @@
 """Waypoint corridor dengan kontrol per ruas: odometry/trace_left/trace_right."""
 
 import argparse
+import csv
 import math
 import statistics
 import time
+from datetime import datetime
 from pathlib import Path
 
 import rclpy
@@ -14,7 +16,7 @@ from nav_msgs.msg import Odometry
 from rclpy.executors import ExternalShutdownException
 from rclpy.node import Node
 from rclpy.qos import qos_profile_sensor_data
-from sensor_msgs.msg import LaserScan
+from sensor_msgs.msg import Imu, LaserScan
 from std_msgs.msg import Bool
 from std_srvs.srv import Empty, Trigger
 
@@ -34,6 +36,13 @@ class HybridCorridorNavigator(Node):
         super().__init__('waypoint_navigator')
         with Path(config_path).open(encoding='utf-8') as stream:
             config = yaml.safe_load(stream) or {}
+        debug = config.get('debug', {})
+        self.debug_enabled = bool(debug.get('enabled', False))
+        self.debug_rate_hz = clamp(
+            float(debug.get('rate_hz', 10.0)), 1.0, 20.0)
+        self.debug_file = None
+        self.debug_writer = None
+        self.debug_path = None
         raw_points = config.get('waypoints', {})
         self.sequence = [str(name).upper() for name in config.get('sequence', [])]
         if not self.sequence:
@@ -80,6 +89,49 @@ class HybridCorridorNavigator(Node):
             str(name).upper()
             for name in motion.get('pause_waypoints', ['A', 'B', 'C', 'D'])
         }
+        self.auto_corner_turn = bool(motion.get('auto_corner_turn', False))
+        self.trace_preserve_heading = bool(
+            motion.get('trace_preserve_heading', False))
+        self.corner_front_distance = float(
+            motion.get('corner_front_distance', 0.28))
+        self.corner_right_distance = float(
+            motion.get('corner_right_distance', 0.65))
+        self.corner_clear_margin = float(
+            motion.get('corner_clear_margin', 0.12))
+        self.turn_tolerance = math.radians(
+            float(motion.get('turn_tolerance_deg', 6.0)))
+        self.turn_settle_time = float(motion.get('turn_settle_time', 0.20))
+        self.turn_timeout = float(motion.get('turn_timeout', 12.0))
+        self.trace_start_grace = float(motion.get('trace_start_grace', 0.0))
+        self.trace_start_max_turn = float(
+            motion.get('trace_start_max_turn', self.max_trace_turn))
+        self.right_near_sector = tuple(
+            float(v) for v in motion.get(
+                'right_near_sector_deg', [-65.0, -55.0]))
+        self.right_far_sector = tuple(
+            float(v) for v in motion.get(
+                'right_far_sector_deg', [-82.0, -75.0]))
+        self.right_gap_u_turn = bool(motion.get('right_gap_u_turn', False))
+        self.right_gap_debounce = float(
+            motion.get('right_gap_debounce', 0.25))
+        self.right_gap_open_ratio = float(
+            motion.get('right_gap_open_ratio', 0.65))
+        self.cross_wall_ratio = float(
+            motion.get('cross_wall_ratio', 0.40))
+        self.cross_wall_min_distance = float(
+            motion.get('cross_wall_min_distance', 0.15))
+        self.cross_wall_max_distance = float(
+            motion.get('cross_wall_max_distance', 0.80))
+        self.right_gap_front_clear = float(
+            motion.get('right_gap_front_clear', 0.50))
+        self.u_turn_forward_1 = float(
+            motion.get('u_turn_forward_1', 0.40))
+        self.u_turn_cross = float(motion.get('u_turn_cross', 0.50))
+        self.u_turn_forward_2 = float(
+            motion.get('u_turn_forward_2', 0.40))
+        self.u_turn_speed = float(motion.get('u_turn_speed', 0.16))
+        self.maneuver_front_stop = float(
+            motion.get('maneuver_front_stop_distance', 0.22))
 
         start = config.get('start_button', {})
         stop = config.get('stop_button', {})
@@ -96,6 +148,10 @@ class HybridCorridorNavigator(Node):
         self.right = math.inf
         self.left_angle = 0.0
         self.right_angle = 0.0
+        self.imu_yaw = None
+        self.last_imu = 0.0
+        self.last_command_linear = 0.0
+        self.last_command_angular = 0.0
         self.active = False
         self.ready = False
         self.start_pending = False
@@ -104,7 +160,20 @@ class HybridCorridorNavigator(Node):
         self.index = 0
         self.segment_index = -1
         self.segment_aligned = False
+        self.segment_heading = None
         self.front_arrival_armed = False
+        self.corner_armed = False
+        self.corner_target_heading = None
+        self.corner_settle_started = None
+        self.right_wall_seen = False
+        self.right_gap_started = None
+        self.maneuver_start_pose = None
+        self.maneuver_target_heading = None
+        self.maneuver_settle_started = None
+        self.gap_probe_samples = 0
+        self.gap_probe_open_samples = 0
+        self.cross_probe_samples = 0
+        self.cross_wall_samples = 0
         self.state = 'BOOTING'
         self.state_started = time.monotonic()
         self.last_start_state = None
@@ -116,6 +185,8 @@ class HybridCorridorNavigator(Node):
 
         self.cmd = self.create_publisher(Twist, '/cmd_vel', 10)
         self.create_subscription(Odometry, '/odom', self.odom_cb, 20)
+        self.create_subscription(Imu, '/imu', self.imu_cb,
+                                 qos_profile_sensor_data)
         self.create_subscription(LaserScan, '/scan', self.scan_cb,
                                  qos_profile_sensor_data)
         if bool(start.get('enabled', True)):
@@ -136,6 +207,26 @@ class HybridCorridorNavigator(Node):
         ]
         self.create_timer(0.04, self.tick)
         self.create_timer(0.5, self.light_tick)
+        if self.debug_enabled:
+            log_dir = Path(debug.get(
+                'directory', '/home/vmx/studica_ws/logs'))
+            log_dir.mkdir(parents=True, exist_ok=True)
+            stamp = datetime.now().strftime('%Y%m%d_%H%M%S')
+            self.debug_path = log_dir / f'right_wall_{stamp}.csv'
+            self.debug_file = self.debug_path.open(
+                'w', newline='', encoding='utf-8')
+            self.debug_writer = csv.writer(self.debug_file)
+            self.debug_writer.writerow([
+                'wall_time', 'elapsed_s', 'active', 'state', 'waypoint',
+                'x_m', 'y_m', 'odom_yaw_deg', 'imu_yaw_deg',
+                'target_x_m', 'target_y_m', 'target_distance_m',
+                'lidar_front_m', 'lidar_left_m', 'lidar_right_m',
+                'right_wall_angle_deg', 'corner_armed', 'gap_open_ratio',
+                'cross_wall_ratio',
+                'cmd_linear_mps', 'cmd_angular_radps'])
+            self.debug_started = time.monotonic()
+            self.create_timer(1.0 / self.debug_rate_hz, self.write_debug_row)
+            self.get_logger().info(f'DEBUG CSV: {self.debug_path}')
         self.get_logger().info(
             f'Hybrid corridor dimuat: {self.sequence}; BOOTING, lampu OFF')
 
@@ -154,15 +245,12 @@ class HybridCorridorNavigator(Node):
                                distance * math.sin(angle), distance))
         return values
 
-    @staticmethod
-    def wall_measurement(msg, side):
+    def wall_measurement(self, msg, side):
         sign = 1.0 if side == 'left' else -1.0
-        near = HybridCorridorNavigator.sector(
-            msg, 55.0, 65.0) if side == 'left' else \
-            HybridCorridorNavigator.sector(msg, -65.0, -55.0)
-        far = HybridCorridorNavigator.sector(
-            msg, 75.0, 82.0) if side == 'left' else \
-            HybridCorridorNavigator.sector(msg, -82.0, -75.0)
+        near = self.sector(msg, 55.0, 65.0) if side == 'left' else \
+            self.sector(msg, *self.right_near_sector)
+        far = self.sector(msg, 75.0, 82.0) if side == 'left' else \
+            self.sector(msg, *self.right_far_sector)
         if len(near) < 3 or len(far) < 3:
             return math.inf, 0.0
         x1 = statistics.median(p[0] for p in near)
@@ -192,6 +280,60 @@ class HybridCorridorNavigator(Node):
         self.pose = (float(msg.pose.pose.position.x),
                      float(msg.pose.pose.position.y), yaw)
         self.last_odom = time.monotonic()
+
+    def imu_cb(self, msg):
+        q = msg.orientation
+        self.imu_yaw = math.atan2(2.0 * (q.w * q.z + q.x * q.y),
+                                  1.0 - 2.0 * (q.y * q.y + q.z * q.z))
+        self.last_imu = time.monotonic()
+
+    @staticmethod
+    def finite_or_blank(value):
+        return round(value, 5) if value is not None and math.isfinite(value) else ''
+
+    def publish_command(self, command):
+        self.last_command_linear = float(command.linear.x)
+        self.last_command_angular = float(command.angular.z)
+        self.cmd.publish(command)
+
+    def write_debug_row(self):
+        if self.debug_writer is None:
+            return
+        x = y = yaw = None
+        if self.pose is not None:
+            x, y, yaw = self.pose
+        name = self.sequence[self.index] if self.index < len(self.sequence) else ''
+        target_x = target_y = distance = None
+        if name and x is not None:
+            point = self.points[name]
+            target_x = float(point.get('x', 0.0))
+            target_y = float(point.get('y', 0.0))
+            distance = math.hypot(target_x - x, target_y - y)
+        self.debug_writer.writerow([
+            datetime.now().isoformat(timespec='milliseconds'),
+            round(time.monotonic() - self.debug_started, 3),
+            int(self.active), self.state, name,
+            self.finite_or_blank(x), self.finite_or_blank(y),
+            self.finite_or_blank(math.degrees(yaw) if yaw is not None else None),
+            self.finite_or_blank(math.degrees(self.imu_yaw)
+                                 if self.imu_yaw is not None else None),
+            self.finite_or_blank(target_x), self.finite_or_blank(target_y),
+            self.finite_or_blank(distance), self.finite_or_blank(self.front),
+            self.finite_or_blank(self.left), self.finite_or_blank(self.right),
+            self.finite_or_blank(math.degrees(self.right_angle)),
+            int(self.corner_armed),
+            round(self.gap_probe_open_samples /
+                  max(1, self.gap_probe_samples), 3),
+            round(self.cross_wall_samples /
+                  max(1, self.cross_probe_samples), 3),
+            round(self.last_command_linear, 4),
+            round(self.last_command_angular, 4)])
+        self.debug_file.flush()
+
+    def close_debug_log(self):
+        if self.debug_file is not None and not self.debug_file.closed:
+            self.debug_file.flush()
+            self.debug_file.close()
 
     def start_button_cb(self, msg):
         active = bool(msg.data) == self.start_active_high
@@ -260,7 +402,7 @@ class HybridCorridorNavigator(Node):
 
     def stop_motors(self):
         for _ in range(3):
-            self.cmd.publish(Twist())
+            self.publish_command(Twist())
 
     def finish_reset(self):
         if self.reset_future is None or not self.reset_future.done():
@@ -314,8 +456,224 @@ class HybridCorridorNavigator(Node):
     def begin_segment(self):
         self.segment_index = self.index
         self.segment_aligned = False
+        self.segment_heading = None
         self.front_arrival_armed = False
+        self.corner_armed = False
+        self.corner_target_heading = None
+        self.corner_settle_started = None
+        self.right_wall_seen = False
+        self.right_gap_started = None
+        self.maneuver_start_pose = None
+        self.maneuver_target_heading = None
+        self.maneuver_settle_started = None
+        self.gap_probe_samples = 0
+        self.gap_probe_open_samples = 0
+        self.cross_probe_samples = 0
+        self.cross_wall_samples = 0
         self.state_started = time.monotonic()
+
+    def begin_left_corner_turn(self, yaw):
+        # Kunci heading ke arah court 0/+90/+180/-90 derajat, lalu tambah 90.
+        cardinal = round(yaw / (math.pi / 2.0)) * (math.pi / 2.0)
+        self.corner_target_heading = cardinal + math.pi / 2.0
+        self.segment_heading = self.corner_target_heading
+        self.corner_settle_started = None
+        self.state = 'TURN_CORNER_LEFT'
+        self.state_started = time.monotonic()
+        self.stop_motors()
+        self.get_logger().info(
+            'SUDUT KANAN tertutup: belok kiri 90 derajat ke heading '
+            f'{math.degrees(angle_error(self.corner_target_heading, 0.0)):.0f} deg')
+
+    def update_corner_turn(self, yaw, now):
+        command = Twist()
+        if now - self.state_started > self.turn_timeout:
+            self.deactivate('Belok kiri 90 derajat timeout')
+            return
+        error = angle_error(self.corner_target_heading, yaw)
+        if abs(error) > self.turn_tolerance:
+            self.corner_settle_started = None
+            speed = clamp(self.heading_kp * abs(error),
+                          self.minimum_turn_speed, self.angular_speed)
+            command.angular.z = math.copysign(speed, error)
+            self.publish_command(command)
+            return
+        if self.corner_settle_started is None:
+            self.corner_settle_started = now
+            self.publish_command(command)
+            return
+        if now - self.corner_settle_started < self.turn_settle_time:
+            self.publish_command(command)
+            return
+        self.state = 'MOVE'
+        self.segment_aligned = True
+        self.corner_armed = False
+        self.corner_settle_started = None
+        self.get_logger().info('BELOK KIRI 90 selesai; lanjut trace_right')
+        self.publish_command(command)
+
+    def begin_right_gap_maneuver(self, x, y):
+        self.state = 'GAP_FORWARD_1'
+        self.state_started = time.monotonic()
+        self.maneuver_start_pose = (x, y)
+        self.maneuver_target_heading = None
+        self.maneuver_settle_started = None
+        self.right_gap_started = None
+        self.gap_probe_samples = 0
+        self.gap_probe_open_samples = 0
+        self.cross_probe_samples = 0
+        self.cross_wall_samples = 0
+        self.stop_motors()
+        self.get_logger().info(
+            'CALON CELAH KANAN: maju uji 0.40 m sebelum memutuskan U-turn')
+
+    def cancel_right_gap_probe(self, now):
+        self.state = 'MOVE'
+        self.state_started = now
+        self.segment_aligned = True
+        self.right_wall_seen = True
+        self.right_gap_started = None
+        self.maneuver_start_pose = None
+        total = max(1, self.gap_probe_samples)
+        ratio = self.gap_probe_open_samples / total
+        self.get_logger().info(
+            'KORIDOR LANJUT/NOISE: kanan kembali terlihat; '
+            f'open_ratio={ratio:.2f}, lanjut trace')
+
+    def maneuver_distance(self, x, y):
+        if self.maneuver_start_pose is None:
+            return 0.0
+        return math.hypot(x - self.maneuver_start_pose[0],
+                          y - self.maneuver_start_pose[1])
+
+    def begin_maneuver_turn(self, yaw, next_state):
+        cardinal = round(yaw / (math.pi / 2.0)) * (math.pi / 2.0)
+        self.maneuver_target_heading = cardinal - math.pi / 2.0
+        self.maneuver_settle_started = None
+        self.state = next_state
+        self.state_started = time.monotonic()
+        self.stop_motors()
+
+    def update_maneuver_turn(self, x, y, yaw, now, next_state):
+        command = Twist()
+        if now - self.state_started > self.turn_timeout:
+            self.deactivate(f'{self.state}: putar kanan timeout')
+            return
+        error = angle_error(self.maneuver_target_heading, yaw)
+        if abs(error) > self.turn_tolerance:
+            self.maneuver_settle_started = None
+            speed = clamp(self.heading_kp * abs(error),
+                          self.minimum_turn_speed, self.angular_speed)
+            command.angular.z = math.copysign(speed, error)
+            self.publish_command(command)
+            return
+        if self.maneuver_settle_started is None:
+            self.maneuver_settle_started = now
+            self.publish_command(command)
+            return
+        if now - self.maneuver_settle_started < self.turn_settle_time:
+            self.publish_command(command)
+            return
+        self.segment_heading = self.maneuver_target_heading
+        self.state = next_state
+        self.state_started = now
+        self.maneuver_start_pose = (x, y)
+        self.maneuver_settle_started = None
+        if next_state == 'GAP_CROSS':
+            self.cross_probe_samples = 0
+            self.cross_wall_samples = 0
+        self.get_logger().info(f'{self.state}: mulai maju')
+        self.publish_command(command)
+
+    def update_right_gap_maneuver(self, x, y, yaw, now):
+        command = Twist()
+        if self.state in ('GAP_FORWARD_1', 'GAP_CROSS', 'GAP_FORWARD_2'):
+            if self.front <= self.maneuver_front_stop:
+                self.deactivate(
+                    f'{self.state}: obstacle depan {self.front:.2f} m')
+                return
+            # Ruas pertama adalah fase klasifikasi sepanjang 40 cm. Jangan
+            # memutuskan dari satu scan: kumpulkan rasio kanan terbuka.
+            if self.state == 'GAP_FORWARD_1':
+                right_visible = (
+                    math.isfinite(self.right) and
+                    self.right < self.wall_visible)
+                self.gap_probe_samples += 1
+                if not right_visible:
+                    self.gap_probe_open_samples += 1
+            elif self.state == 'GAP_CROSS':
+                right_visible = (
+                    math.isfinite(self.right) and
+                    self.cross_wall_min_distance <= self.right <=
+                    self.cross_wall_max_distance)
+                self.cross_probe_samples += 1
+                if right_visible:
+                    self.cross_wall_samples += 1
+            targets = {
+                'GAP_FORWARD_1': self.u_turn_forward_1,
+                'GAP_CROSS': self.u_turn_cross,
+                'GAP_FORWARD_2': self.u_turn_forward_2,
+            }
+            if self.maneuver_distance(x, y) < targets[self.state]:
+                command.linear.x = self.u_turn_speed
+                if self.segment_heading is not None:
+                    heading_error = angle_error(self.segment_heading, yaw)
+                    command.angular.z = clamp(
+                        self.heading_kp * heading_error, -0.30, 0.30)
+                self.publish_command(command)
+                return
+            if self.state == 'GAP_FORWARD_1':
+                total = max(1, self.gap_probe_samples)
+                open_ratio = self.gap_probe_open_samples / total
+                right_visible = (
+                    math.isfinite(self.right) and
+                    self.cross_wall_min_distance <= self.right <=
+                    self.cross_wall_max_distance)
+                if right_visible or open_ratio < self.right_gap_open_ratio:
+                    self.cancel_right_gap_probe(now)
+                    self.publish_command(command)
+                    return
+                self.get_logger().info(
+                    'BUKAAN KANAN terkonfirmasi setelah probe 0.40 m; '
+                    f'open_ratio={open_ratio:.2f}; '
+                    'kanan -90 lalu maju 0.40 m sambil klasifikasi')
+                self.begin_maneuver_turn(yaw, 'GAP_TURN_1')
+            elif self.state == 'GAP_CROSS':
+                total = max(1, self.cross_probe_samples)
+                wall_ratio = self.cross_wall_samples / total
+                right_visible = (
+                    math.isfinite(self.right) and
+                    self.cross_wall_min_distance <= self.right <=
+                    self.cross_wall_max_distance)
+                if right_visible and wall_ratio >= self.cross_wall_ratio:
+                    self.state = 'MOVE'
+                    self.state_started = now
+                    self.segment_aligned = True
+                    self.right_wall_seen = True
+                    self.right_gap_started = None
+                    self.get_logger().info(
+                        'KORIDOR LANJUT setelah belok kanan: '
+                        f'wall_ratio={wall_ratio:.2f}; langsung trace_right')
+                    self.publish_command(command)
+                else:
+                    self.get_logger().info(
+                        'AREA TETAP TERPUTUS setelah maju 0.40 m: '
+                        f'wall_ratio={wall_ratio:.2f}; putar kanan kedua')
+                    self.begin_maneuver_turn(yaw, 'GAP_TURN_2')
+            else:
+                self.state = 'MOVE'
+                self.state_started = now
+                self.segment_aligned = True
+                self.right_wall_seen = False
+                self.right_gap_started = None
+                self.get_logger().info(
+                    'U-TURN selesai; mencari dan melanjutkan trace_right')
+                self.publish_command(command)
+            return
+        if self.state == 'GAP_TURN_1':
+            self.update_maneuver_turn(x, y, yaw, now, 'GAP_CROSS')
+        elif self.state == 'GAP_TURN_2':
+            self.update_maneuver_turn(x, y, yaw, now, 'GAP_FORWARD_2')
 
     def tick(self):
         command = Twist()
@@ -324,7 +682,7 @@ class HybridCorridorNavigator(Node):
             self.finish_reset()
             return
         if not self.active:
-            self.cmd.publish(command)
+            self.publish_command(command)
             return
         if self.pose is None or now - self.last_odom > self.odom_timeout:
             self.deactivate('Odometry stale')
@@ -334,10 +692,17 @@ class HybridCorridorNavigator(Node):
             return
         if self.state == 'PAUSE':
             if now - self.state_started < self.pause_seconds:
-                self.cmd.publish(command)
+                self.publish_command(command)
                 return
             self.state = 'MOVE'
             self.light_command = 'green'
+
+        if self.state == 'TURN_CORNER_LEFT':
+            self.update_corner_turn(self.pose[2], now)
+            return
+        if self.state.startswith('GAP_'):
+            self.update_right_gap_maneuver(*self.pose, now)
+            return
 
         name = self.sequence[self.index]
         point = self.points[name]
@@ -375,9 +740,15 @@ class HybridCorridorNavigator(Node):
             return
         # heading_deg mengunci arah lorong terhadap yaw nol saat START.
         # Tanpa parameter ini, heading diarahkan dinamis ke koordinat target.
-        target_heading = (
-            math.radians(float(point['heading_deg']))
-            if 'heading_deg' in point else math.atan2(dy, dx))
+        if self.segment_heading is None:
+            if control in ('trace_left', 'trace_right') and self.trace_preserve_heading:
+                self.segment_heading = (
+                    round(yaw / (math.pi / 2.0)) * (math.pi / 2.0))
+            else:
+                self.segment_heading = (
+                    math.radians(float(point['heading_deg']))
+                    if 'heading_deg' in point else math.atan2(dy, dx))
+        target_heading = self.segment_heading
         heading = angle_error(target_heading, yaw)
 
         # Ruas trace menghadap koordinat tujuan terlebih dahulu, sama seperti
@@ -388,12 +759,12 @@ class HybridCorridorNavigator(Node):
                               self.minimum_turn_speed,
                               self.angular_speed)
                 command.angular.z = math.copysign(speed, heading)
-                self.cmd.publish(command)
+                self.publish_command(command)
                 return
             self.segment_aligned = True
             self.get_logger().info(
                 f'{name}: heading siap, mulai {control}')
-            self.cmd.publish(command)
+            self.publish_command(command)
             return
         if control == 'odometry':
             if abs(heading) > self.align_tolerance:
@@ -415,6 +786,28 @@ class HybridCorridorNavigator(Node):
                 command.angular.z = clamp(self.heading_kp * heading,
                                           -0.45, 0.45)
         else:
+            right_visible = (
+                math.isfinite(self.right) and
+                self.right < self.wall_visible)
+            if control == 'trace_right' and right_visible:
+                self.right_wall_seen = True
+                self.right_gap_started = None
+            elif (control == 'trace_right' and self.right_gap_u_turn and
+                  self.right_wall_seen and
+                  self.front > self.right_gap_front_clear):
+                if self.right_gap_started is None:
+                    self.right_gap_started = now
+                elif now - self.right_gap_started >= self.right_gap_debounce:
+                    self.begin_right_gap_maneuver(x, y)
+                    return
+            if self.front > self.corner_front_distance + self.corner_clear_margin:
+                self.corner_armed = True
+            if (control == 'trace_right' and self.auto_corner_turn and
+                    self.corner_armed and
+                    self.front <= self.corner_front_distance and
+                    self.right <= self.corner_right_distance):
+                self.begin_left_corner_turn(yaw)
+                return
             if self.front < self.front_stop:
                 self.deactivate(f'Obstacle depan {self.front:.2f} m')
                 return
@@ -432,16 +825,19 @@ class HybridCorridorNavigator(Node):
                 wall_error = wall_distance - target_wall
                 wall_turn = side * (self.wall_kp * wall_error +
                                     self.wall_angle_kp * wall_angle)
+                turn_limit = self.max_trace_turn
+                if now - self.state_started < self.trace_start_grace:
+                    turn_limit = min(turn_limit, self.trace_start_max_turn)
                 command.angular.z = clamp(
                     wall_turn + 0.25 * self.heading_kp * heading,
-                    -self.max_trace_turn, self.max_trace_turn)
+                    -turn_limit, turn_limit)
             else:
                 # Saat ujung dinding hilang, pertahankan arah menuju waypoint;
                 # jangan membelok tajam untuk mengejar dinding yang sudah lewat.
                 command.linear.x = min(command.linear.x, self.approach_speed)
                 command.angular.z = clamp(
                     self.heading_kp * heading, -0.35, 0.35)
-        self.cmd.publish(command)
+        self.publish_command(command)
 
     def light_tick(self):
         phase = int(time.monotonic() * 2.0) % 2 == 0
@@ -472,6 +868,7 @@ def main():
         pass
     finally:
         node.stop_motors()
+        node.close_debug_log()
         node.destroy_node()
         if rclpy.ok():
             rclpy.shutdown()
