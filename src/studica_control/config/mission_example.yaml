@@ -1,0 +1,201 @@
+# bash scripts/start_full_keyboard.sh \
+#  --human-config src/studica_control/config/mission_example.yaml
+# All ranges below are inclusive and follow mission_runner.py.
+# Use numbers (not true/false), spaces for indentation, and exact parameter names.
+# Software limits do not define mechanical travel limits; use the correct calibration.
+
+# Robot pose when START is pressed
+# x/y: meters; yaw_deg: degrees. Signed finite numbers; no specific range limit.
+start_pose:
+  x: 0.0
+  y: 0.0
+  yaw_deg: 0.0
+
+# Required for lift and oms_rotate actions; scale must be a nonzero finite number.
+# Signed scale: physical displacement per +1 encoder revolution.
+# Lift: encoder increases downward => negative cm_per_rev makes positive delta move upward.
+# Determine scale magnitude through mechanical calibration; it does not set speed.
+calibration:
+  lift_cm_per_rev: -8.017
+  rotate_deg_per_rev: 0.2459016393442623
+  # Duty sign must be -1 or +1: electrical direction for positive physical displacement.
+  lift_positive_duty_sign: -1
+  rotate_positive_duty_sign: -1
+
+settings:
+  # Mission settings; manual keyboard speed is set through launcher arguments.
+  # All settings must be 0.001..100 unless a stricter range is specified below.
+  # Optional parameters (defaults when omitted):
+  # minimum_angular_speed_rps: 0.25  # 0.01..angular_speed_rps; rad/s.
+  # If angular_speed_rps < 0.25, lower the minimum as well.
+  # feedback_timeout_s: 0.5  # seconds; maximum sensor data age.
+  # rotate_tolerance_deg: 2  # degrees; OMS completion tolerance.
+  # lift_tolerance_cm: 0.5  # cm; lift completion tolerance.
+  linear_speed_mps: 0.15  # 0.01..0.75 m/s; default for goto/forward/trace.
+  angular_speed_rps: 1.0  # 0.01..2 rad/s (not revolutions/s); >= minimum_angular_speed_rps.
+  heading_tolerance_deg: 3  # 0.001..100 degrees; robot heading tolerance.
+  position_tolerance_m: 0.05  # 0.001..100 meters; goto position tolerance.
+  front_stop_cm: 8  # 0.001..100 cm; front obstacle safety stop threshold.
+  trace_kp: 2.0  # 0.001..100; wall-following correction gain.
+  heading_kp: 1.5  # 0.001..100; heading correction gain.
+  rotate_duty_percent: 33.3  # Use 0.1..100%; default for oms_rotate actions.
+  slide_duty_percent: 15  # Use 0.1..100%; default for slide actions.
+
+servo_positions:
+  # The "on"/"off" keys MUST be quoted to avoid YAML boolean conversion.
+  # Values must be left_value/right_value; angles are configured in keyboard_servos.yaml.
+  wrist:
+    "on": left_value
+    "off": right_value
+  gripper:
+    "on": left_value
+    "off": right_value
+
+mission:
+  # Keep green on while moving, until another light action changes it.
+  - action: light
+    color: green
+    mode: steady
+
+  # Steps run sequentially. Each action timeout_s: 0.05..600 seconds, default 30.
+  # Timeout limits the wait for completion; it does not set movement duration.
+  # speed_mps: 0.01..0.75 m/s; defaults to settings.linear_speed_mps when omitted.
+  # until requires exactly one key: travel_cm OR lidar_front_cm, range 0.1..10000 cm.
+  # lidar_front_cm must be > settings.front_stop_cm.
+  # Move to absolute coordinates in meters
+  # x/y: signed finite numbers with no specific range limit.
+  - action: goto
+    x: 1.0
+    y: 0.5
+    speed_mps: 0.15
+    timeout_s: 30
+
+  # Move forward 100 cm using odometry
+  - action: forward
+    until:
+      travel_cm: 100
+    speed_mps: 0.15
+    timeout_s: 30
+
+  # Move forward until front LiDAR distance reaches 20 cm
+  - action: forward
+    until:
+      lidar_front_cm: 20
+    speed_mps: 0.10
+    timeout_s: 30
+
+  # Follow the right wall at a distance of 30 cm
+  - action: trace
+    side: right  # Only left/right; wall_distance_cm: 1..500 cm.
+    wall_distance_cm: 30
+    until:
+      travel_cm: 100
+    speed_mps: 0.10
+    timeout_s: 30
+
+  # Face an absolute heading of 90 degrees
+  # angle_deg: -360..360; positive is counterclockwise.
+  - action: heading
+    angle_deg: 90
+    timeout_s: 15
+
+  # Turn right by 90 degrees relative to the current heading
+  # direction: left/right; angle_deg: 0..360 (direction determines the turn direction).
+  - action: turn
+    direction: right
+    angle_deg: 90
+    timeout_s: 15
+
+  # Drive straight for 2 seconds
+  # vx_mps: -0.75..0.75 m/s; negative moves backward.
+  # duration_s: 0.01..300 seconds; timeout_s must be > duration_s.
+  - action: robot_move
+    vx_mps: 0.10
+    duration_s: 2
+    timeout_s: 5
+
+  # Rotate the OMS/gripper by 90 degrees
+  # angle_deg: -360..360 relative; positive direction follows calibration.
+  # duty_percent: 0.1..100%; not RPM.
+  # Alternatively, replace angle_deg with target: default to return to the saved position.
+  - action: oms_rotate
+    angle_deg: 90
+    duty_percent: 33.3
+    timeout_s: 15
+
+  # Raise the lift by 10 cm
+  # delta_cm: -200..200 cm relative; positive raises, negative lowers with correct calibration.
+  # Alternatively, replace delta_cm with target: default; do not specify both.
+  # Lift speed uses PID/RPM from keyboard arguments, not delta_cm.
+  - action: lift
+    delta_cm: 10
+    timeout_s: 20
+
+  # Move the slide forward for 2 seconds
+  # direction: forward = keyboard G, backward = keyboard H.
+  # Follows --slide-polarity just like the keyboard; duration_s: 0.01..30 seconds.
+  # duty_percent: 0.1..100%; timeout_s must be > duration_s.
+  - action: slide
+    direction: forward
+    duration_s: 2
+    duty_percent: 15
+    timeout_s: 5
+
+  # Retract slide (keyboard H), then stop the slide automatically.
+  - action: slide
+    direction: backward
+    duration_s: 2
+    duty_percent: 15
+    timeout_s: 5
+
+  # Move the wrist to its ON position
+  # For wrist/gripper: position must be "on", "off", or default (saved position).
+  # settle_s: 0..30 seconds, default 1; allow timeout for servo acknowledgement + settling.
+  - action: wrist
+    position: "on"
+    settle_s: 1
+    timeout_s: 5
+
+  # Close the gripper
+  - action: gripper
+    position: "on"
+    settle_s: 1
+    timeout_s: 5
+
+  # Wait for 2 seconds
+  # seconds: 0..300 seconds; timeout_s must be > seconds.
+  - action: wait
+    seconds: 2
+    timeout_s: 5
+
+  # Blink yellow for 5 seconds while the robot waits, then switch all lights off.
+  # color: red/green/yellow/"off"; mode: steady/blink (lowercase), default steady.
+  # Use yellow for a yellow light, red for a red light, or green for a green light.
+  # steady: continuous light; blink: flashing light; "off": turn off the lights.
+  - action: light
+    color: yellow
+    mode: blink
+    duration_s: 5
+    timeout_s: 10
+  # duration_s is optional (0.01..300); timeout_s must be greater.
+  # Omit duration_s to keep the light active while subsequent actions run.
+
+  # Detect an object using the camera
+  # colour: nonempty text matching a color label from the detector.
+  # Optional shape: rectangle/circle/triangle; omit to accept all shapes.
+  # save_as: result name as text, default target.
+  # on_not_found: stop/continue, default stop; applies when detection times out.
+  - action: detect_camera
+    colour: yellow
+    shape: rectangle
+    save_as: objek_target
+    on_not_found: stop
+    timeout_s: 10
+
+  # Turn off the light
+  - action: light
+    color: "off"
+    mode: steady   # Or blink (lowercase)
+
+  # End the mission
+  - action: stop

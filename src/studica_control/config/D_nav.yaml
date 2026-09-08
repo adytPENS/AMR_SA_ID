@@ -1,0 +1,43 @@
+# Jalankan melalui scripts/start_full_keyboard.sh --human-config file ini.
+# BOOT: semua mati. READY setelah M: merah steady. START fisik: mulai misi.
+# STOP fisik / E / X: hentikan gerakan dan kembali merah steady.
+start_pose:
+  x: 0.0
+  y: 0.0
+  yaw_deg: 0.0
+
+calibration:
+  # Sama dengan misi_forward_gripper.yaml: encoder bertambah ke kiri.
+  rotate_deg_per_rev: 406.46065095866857
+  rotate_positive_duty_sign: -1
+
+mission:
+  - action: light
+    color: green
+    mode: steady
+
+  - action: forward
+    until:
+      travel_cm: 100
+    speed_mps: 0.15
+    timeout_s: 20
+
+  - action: light
+    color: yellow
+    mode: blink
+
+  - action: wait
+    seconds: 5
+    timeout_s: 8
+
+  - action: oms_rotate
+    angle_deg: 90
+    duty_percent: 40
+    timeout_s: 15
+
+  - action: light
+    color: red
+    mode: blink
+
+  # Selesai: motor berhenti, merah tetap blink sampai STOP ditekan.
+  - action: stop

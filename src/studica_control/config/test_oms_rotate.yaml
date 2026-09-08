@@ -1,0 +1,11 @@
+# Tes relatif: +30 derajat ke kiri dari posisi saat langkah dimulai.
+calibration:
+  rotate_deg_per_rev: 406.46065095866857
+  rotate_positive_duty_sign: -1
+
+mission:
+  - action: oms_rotate
+    angle_deg: 30
+    duty_percent: 20
+    timeout_s: 5
+  - action: stop

@@ -248,6 +248,7 @@ install(TARGETS ${cpp_example_targets}
 
 # ---- Python examples ----
 set(python_example_scripts
+  src/components/examples/python/robot_dashboard.py
   src/components/examples/python/dio_input_monitor.py
   src/components/examples/python/lidar_angle_monitor.py
   src/components/examples/python/front_scan_filter.py

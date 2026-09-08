@@ -39,6 +39,27 @@ def test_default_and_examples_are_valid_yaml():
         runner.start(SNAPSHOT)
 
 
+def test_timed_light_waits_then_turns_off():
+    r, clock = make([dict(action='light', color='yellow', mode='blink',
+                          duration_s=5, timeout_s=10), dict(action='stop')])
+    r.start(SNAPSHOT)
+    assert r.tick() == {}
+    assert r.light == ('yellow', 'blink') and r.index == 0
+    clock[0] = 4.9
+    r.tick()
+    assert r.light == ('yellow', 'blink') and r.index == 0
+    clock[0] = 5
+    r.tick()
+    assert r.light == ('off', 'steady') and r.index == 1
+
+
+@pytest.mark.parametrize('duration', [0, -1, float('nan'), 301, 30])
+def test_invalid_light_duration(duration):
+    with pytest.raises(ValueError):
+        r, _ = make([dict(action='light', color='yellow', duration_s=duration)])
+        r.start(SNAPSHOT)
+
+
 def test_light_wait_done_and_cancel():
     r, clock = make([dict(action='light', color='red'), dict(action='wait', seconds=1), dict(action='stop')])
     r.start(SNAPSHOT)
@@ -232,7 +253,7 @@ def test_adapter_lift_pid_failure_emits_zero_to_all_motors():
                            publish_cmd=Mock(), publish_oms=Mock(), publish_servos=Mock())
     node.lift_pid.calculate.side_effect = RuntimeError('RPM stale')
     adapter = SimpleNamespace(node=node, runner=r,
-                               args=SimpleNamespace(lift_up_rpm=30, lift_down_rpm=30),
+                               args=SimpleNamespace(lift_up_rpm=30, lift_down_rpm=30, slide_polarity=1),
                                update_lights=Mock(), results_pub=Mock(), last_results=None)
     MissionROS.tick(adapter)
     assert r.state == 'ERROR'

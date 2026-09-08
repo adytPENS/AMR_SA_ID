@@ -115,7 +115,7 @@
     },
     {
       "name": "ob 1",
-      "enabled": true,
+      "enabled": false,
       "low": [
         167,
         87,
@@ -129,7 +129,7 @@
     },
     {
       "name": "ob 2",
-      "enabled": true,
+      "enabled": false,
       "low": [
         34,
         21,
@@ -153,6 +153,20 @@
         43,
         255,
         234
+      ]
+    },
+    {
+      "name": "purple box",
+      "enabled": true,
+      "low": [
+        91,
+        88,
+        22
+      ],
+      "high": [
+        139,
+        172,
+        88
       ]
     }
   ],

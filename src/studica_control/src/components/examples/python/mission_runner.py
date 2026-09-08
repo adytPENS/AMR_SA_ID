@@ -32,7 +32,7 @@ class MissionRunner:
         'slide': {'direction', 'duration_s', 'duty_percent'},
         'wrist': {'position', 'settle_s'},
         'gripper': {'position', 'settle_s'},
-        'light': {'color', 'mode'}, 'wait': {'seconds'}, 'stop': set(),
+        'light': {'color', 'mode', 'duration_s'}, 'wait': {'seconds'}, 'stop': set(),
         'detect_camera': {'colour', 'shape', 'save_as', 'on_not_found'},
     }
     BASE = {'goto', 'forward', 'trace', 'heading', 'robot_movetheta', 'turn', 'robot_move'}
@@ -48,6 +48,7 @@ class MissionRunner:
         self.settings = {
             'feedback_timeout_s': .5, 'linear_speed_mps': .15,
             'angular_speed_rps': .5, 'position_tolerance_m': .05,
+            'minimum_angular_speed_rps': .25,
             'heading_tolerance_deg': 3, 'front_stop_cm': 8,
             'rotate_tolerance_deg': 2, 'lift_tolerance_cm': .5,
             'trace_kp': 2, 'heading_kp': 1.5, 'rotate_duty_percent': 33.3,
@@ -61,6 +62,9 @@ class MissionRunner:
             self.settings[name] = number(value, name, .001, 100)
         number(self.settings['linear_speed_mps'], 'linear_speed_mps', .01, .75)
         number(self.settings['angular_speed_rps'], 'angular_speed_rps', .01, 2)
+        number(self.settings['minimum_angular_speed_rps'],
+               'minimum_angular_speed_rps', .01,
+               self.settings['angular_speed_rps'])
         self.start_pose = config.get('start_pose', {'x': 0, 'y': 0, 'yaw_deg': 0})
         for key in ('x', 'y', 'yaw_deg'):
             self.start_pose[key] = number(self.start_pose.get(key), 'start_pose.' + key)
@@ -140,6 +144,10 @@ class MissionRunner:
             if a == 'light':
                 if s.get('color') not in ('red', 'green', 'yellow', 'off') or s.get('mode', 'steady') not in ('steady', 'blink'):
                     raise ValueError('light: color/mode tidak dikenal')
+                if 'duration_s' in s:
+                    number(s['duration_s'], 'duration_s', .01, 300)
+                    if s['duration_s'] >= s.get('timeout_s', 30):
+                        raise ValueError('timeout_s harus lebih besar dari duration_s')
             if a in ('wrist', 'gripper') and s.get('position') != 'default':
                 mapping = self.config.get('servo_positions', {}).get(a, {'on': 'left_value', 'off': 'right_value'})
                 if not isinstance(mapping, dict) or mapping.get(s['position']) not in ('left_value', 'right_value'):
@@ -260,6 +268,10 @@ class MissionRunner:
 
     def do_light(self, s, elapsed):
         self.light = (s['color'], s.get('mode', 'steady'))
+        if 'duration_s' in s:
+            if elapsed < s['duration_s']:
+                return {}
+            self.light = ('off', 'steady')
         return self.advance()
 
     def base_command(self, vx, wz):
@@ -336,7 +348,10 @@ class MissionRunner:
         error = wrap(math.radians(s['angle_deg']) - yaw)
         if abs(error) <= math.radians(self.settings['heading_tolerance_deg']):
             return self.advance()
-        return self.base_command(0, error * self.settings['heading_kp'])
+        speed = max(self.settings['minimum_angular_speed_rps'],
+                    abs(error * self.settings['heading_kp']))
+        speed = min(self.settings['angular_speed_rps'], speed)
+        return self.base_command(0, math.copysign(speed, error))
 
     do_robot_movetheta = do_heading
 
@@ -349,7 +364,10 @@ class MissionRunner:
         error = target - self.context['turned']
         if abs(error) <= math.radians(self.settings['heading_tolerance_deg']):
             return self.advance()
-        return self.base_command(0, error * self.settings['heading_kp'])
+        speed = max(self.settings['minimum_angular_speed_rps'],
+                    abs(error * self.settings['heading_kp']))
+        speed = min(self.settings['angular_speed_rps'], speed)
+        return self.base_command(0, math.copysign(speed, error))
 
     def axis(self, axis, s):
         current = self.read(axis)

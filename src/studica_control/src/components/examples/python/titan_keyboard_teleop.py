@@ -231,6 +231,11 @@ class KeyboardCmdVel(Node):
         self.rotate_pid = OmsRpmPid(
             args.rotate_max_rpm, args.oms_pid_kp, args.oms_pid_ki,
             args.rotate_duty_limit, args.rotate_minimum_duty)
+        self.indicator_lights = {
+            color: self.create_publisher(Bool, f'/light_{color}/cmd', 10)
+            for color in ('control', 'red', 'green', 'yellow')
+        }
+        self.last_light_commands = {}
         self.create_subscription(
             Float64, f'/{oms_sensor}/m_2/rpm', self.lift_rpm_callback, 10)
         self.create_subscription(
@@ -257,6 +262,30 @@ class KeyboardCmdVel(Node):
     def publish_oms(self, lift: float, rotate: float) -> None:
         self.oms_lift_publisher.publish(Float64(data=float(lift)))
         self.oms_rotate_publisher.publish(Float64(data=float(rotate)))
+
+    def update_indicator(self, mission_running: bool,
+                         force: bool = False) -> None:
+        """Solid red after startup; off only while an automatic mission runs."""
+        self.publish_light_states({
+            'control': not mission_running,
+            'red': not mission_running,
+            'green': False,
+            'yellow': False,
+        }, force=force)
+
+    def publish_light_states(self, values, force=False) -> None:
+        """One owner for READY and mission lights; keep unchanged DIO latched.
+
+        C/pin 12 HIGH selects continuous, LOW selects hardware blink.
+        Retry when a subscriber appears so startup discovery cannot lose READY.
+        """
+        for color, publisher in self.indicator_lights.items():
+            value = bool(values[color])
+            subscribers = publisher.get_subscription_count()
+            command = (value, subscribers)
+            if force or self.last_light_commands.get(color) != command:
+                publisher.publish(Bool(data=value))
+                self.last_light_commands[color] = command
 
     def command_servo_position(self, key):
         name, value = self.servo_positions[key]
@@ -295,6 +324,15 @@ class KeyboardCmdVel(Node):
             self.publish_oms(0.0, 0.0)
             self.publish_servos(0.0)
             rclpy.spin_once(self, timeout_sec=0.02)
+
+    def lights_off(self) -> None:
+        self.publish_light_states(
+            {color: False for color in self.indicator_lights}, force=True)
+
+    def process_callbacks(self, limit: int = 16) -> None:
+        """Drain the high-rate sensor queue so odometry/RPM stay fresh."""
+        for _ in range(limit):
+            rclpy.spin_once(self, timeout_sec=0.0)
 
 
 def parse_args():
@@ -356,6 +394,18 @@ def parse_args():
     parser.add_argument('--distance', type=float, default=1.0)
     parser.add_argument('--distance-timeout', type=float, default=20.0)
     args, _ = parser.parse_known_args()
+    if args.human_config:
+        config_path = Path(args.human_config).expanduser()
+        if not config_path.is_file() and not config_path.is_absolute():
+            # Accept package-relative paths such as config/mission.yaml even
+            # when the launcher is run from the workspace root.
+            package_path = Path(__file__).resolve().parents[4] / config_path
+            if package_path.is_file():
+                config_path = package_path
+        if not config_path.is_file():
+            parser.error(
+                f'--human-config tidak ditemukan: {args.human_config}')
+        args.human_config = str(config_path.resolve())
     if not 0.02 <= args.linear_speed <= 0.75:
         parser.error('--linear-speed harus 0.02..0.75 m/s')
     if not 0.10 <= args.angular_speed <= 5.0:
@@ -495,9 +545,11 @@ def main() -> None:
             node.publish_oms(0.0, 0.0)
             node.publish_servos(0.0)
             rclpy.spin_once(node, timeout_sec=0.02)
+        node.update_indicator(False, force=True)
 
         previous_time = time.monotonic()
         while rclpy.ok():
+            node.process_callbacks()
             now = time.monotonic()
             dt = now - previous_time
             previous_time = now
@@ -506,7 +558,8 @@ def main() -> None:
                 key = sys.stdin.read(1).lower()
                 if node.human.stop_pressed and key != 'q':
                     key = 'e'
-                if node.human.owns_control and key not in ('m', 'e', 'x', 'q'):
+                if (node.human.owns_control and
+                        key not in ('m', 'e', 'x', 'q', 'p')):
                     key = ''
                 if (key in key_commands or key in oms_commands or
                         key in servo_commands or key in args.servo_positions or
@@ -517,6 +570,9 @@ def main() -> None:
                     active_key = None
                     distance_active = False
                     node.lift_pid.reset()
+                    # M must be usable directly: establish commanded targets
+                    # before CAPTURE locks out normal manual keys.
+                    node.initialize_standard_servos()
                     node.stop()
                     node.human.capture()
                 elif key == 'z':
@@ -563,8 +619,6 @@ def main() -> None:
                 node.human.message = node.mission.runner.message
                 if node.mission.runner.state != 'RUNNING':
                     node.human.state = node.mission.runner.state
-            if node.human.owns_control:
-                node.mission.update_lights()
             node.human.tick({name: servo.target for name, servo in
                              node.standard_servos.items()})
             status = f'{node.human.state}: {node.human.message}'
@@ -573,13 +627,11 @@ def main() -> None:
                 node.human_status.publish(String(data=status))
                 node.human_last_status = status
             if node.human.state == 'RUNNING':
+                node.mission.update_lights()
                 auto_follow = False
                 active_key = None
                 distance_active = False
-                rclpy.spin_once(node, timeout_sec=0.0)
                 continue
-            if node.human.stop_pressed:
-                node.mission.stop()
             if node.human.owns_control or node.human.stop_pressed:
                 auto_follow = False
                 active_key = None
@@ -632,17 +684,28 @@ def main() -> None:
                 if active_key in servo_commands and not distance_active
                 else (0.0, 0.0, 0.0))
             node.publish_servos(*servo_command, dt=dt)
+            # Tombol keyboard (termasuk I/K/J/L dan W/S/A/D) tidak mengubah
+            # indikator READY. Merah tetap solid selama mode manual.
+            if node.human.stop_pressed:
+                # STOP has highest priority and must remain solid red without
+                # alternating with MissionROS.stop() output-off commands.
+                node.update_indicator(False)
+            elif node.human.state == 'DONE':
+                # Preserve the final light explicitly requested by the YAML.
+                node.mission.update_lights()
+            else:
+                node.update_indicator(False)
             label = (node.yellow_follower.status if auto_follow else
                      ('G' if distance_active else (active_key.upper() if active_key else 'STOP')))
             if label != last_label:
                 node.get_logger().info(label)
                 last_label = label
-            rclpy.spin_once(node, timeout_sec=0.0)
     except KeyboardInterrupt:
         pass
     finally:
         node.mission.stop()
         node.stop()
+        node.lights_off()
         termios.tcsetattr(sys.stdin, termios.TCSADRAIN, old_terminal)
         node.get_logger().info('STOP — /cmd_vel nol')
         node.destroy_node()

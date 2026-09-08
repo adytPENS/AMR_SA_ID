@@ -206,3 +206,39 @@ class ServoPositionConfigTest(unittest.TestCase):
                 with patch.object(sys, 'argv', ['teleop', '--servo-config', str(config)]), \
                      patch('sys.stderr'), self.assertRaises(SystemExit):
                     parse_args()
+
+
+class LightControlTest(unittest.TestCase):
+    def test_steady_blink_and_ready_share_output_without_periodic_reset(self):
+        from mission_ros import MissionROS
+        node = SimpleNamespace(
+            indicator_lights={c: Mock() for c in
+                              ('control', 'red', 'green', 'yellow')},
+            last_light_commands={})
+        for publisher in node.indicator_lights.values():
+            publisher.get_subscription_count.return_value = 1
+        node.publish_light_states = MethodType(KeyboardCmdVel.publish_light_states, node)
+        mission = SimpleNamespace(node=node, runner=SimpleNamespace(light=('green', 'steady')))
+        KeyboardCmdVel.update_indicator(node, False)
+        MissionROS.update_lights(mission)
+        for publisher in node.indicator_lights.values():
+            publisher.publish.reset_mock()
+        with patch('time.monotonic', return_value=1000):
+            for _ in range(30):
+                MissionROS.update_lights(mission)
+        for publisher in node.indicator_lights.values():
+            publisher.publish.assert_not_called()
+        self.assertEqual(node.last_light_commands['control'], (True, 1))
+        self.assertEqual(node.last_light_commands['green'], (True, 1))
+        mission.runner.light = ('yellow', 'blink')
+        MissionROS.update_lights(mission)
+        self.assertEqual(node.last_light_commands['control'], (False, 1))
+        self.assertEqual(node.last_light_commands['yellow'], (True, 1))
+        KeyboardCmdVel.update_indicator(node, False)
+        self.assertEqual(node.last_light_commands['control'], (True, 1))
+        self.assertEqual(node.last_light_commands['red'], (True, 1))
+        self.assertEqual(node.last_light_commands['yellow'], (False, 1))
+        node.indicator_lights['red'].publish.reset_mock()
+        node.indicator_lights['red'].get_subscription_count.return_value = 2
+        KeyboardCmdVel.update_indicator(node, False)
+        node.indicator_lights['red'].publish.assert_called_once()

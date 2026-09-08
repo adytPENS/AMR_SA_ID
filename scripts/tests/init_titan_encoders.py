@@ -20,11 +20,9 @@ def main():
             client = node.create_client(SetData, service)
             deadline = time.monotonic() + args.timeout
             print(f'Menunggu {service} (maksimal {args.timeout:g} detik)...', flush=True)
-            while not client.wait_for_service(
-                    timeout_sec=min(1.0, max(0.0, deadline - time.monotonic()))):
+            while not client.wait_for_service(timeout_sec=min(1.0, max(0.0, deadline - time.monotonic()))):
                 if time.monotonic() >= deadline or not rclpy.ok():
-                    raise RuntimeError(
-                        f'{service} tidak ditemukan; periksa ROS_DOMAIN_ID dan RMW driver.')
+                    raise RuntimeError(f'{service} tidak ditemukan; periksa ROS_DOMAIN_ID dan RMW driver.')
             print(f'Service siap: {service}', flush=True)
             if args.wait_only:
                 continue

@@ -31,10 +31,6 @@ class MissionROS:
         self.runner = MissionRunner(config, time.monotonic, args.servo_positions)
         self.results_pub = node.create_publisher(String, '/human_interaction/results', 10)
         self.last_results = None
-        self.lights = {color: node.create_publisher(Bool, f'/light_{color}/cmd', 10)
-                       for color in ('control', 'red', 'green', 'yellow')}
-        self.last_lights = None
-        self.light_time = 0
         node.create_subscription(Odometry, '/odom', self.odom, qos_profile_sensor_data)
         node.create_subscription(Imu, '/imu', self.imu, qos_profile_sensor_data)
         node.create_subscription(LaserScan, '/scan', lambda msg: self.runner.observe('scan', scan_sectors(msg)), qos_profile_sensor_data)
@@ -96,8 +92,8 @@ class MissionROS:
             node.standard_servos[name].target = value
             node.standard_servos[name].last_sent = value
             node.servo_commands[name].set_target(value)
-        node.publish_servos(output.get('slide', 0))
-        self.update_lights()
+        # Match manual G (forward) / H (backward), including launcher polarity.
+        node.publish_servos(output.get('slide', 0) * self.args.slide_polarity)
         results = json.dumps(self.runner.results)
         if results != self.last_results:
             self.results_pub.publish(String(data=results))
@@ -105,17 +101,13 @@ class MissionROS:
 
     def update_lights(self):
         color, mode = self.runner.light
-        enabled = mode == 'steady' or int(time.monotonic()*2) % 2 == 0
-        states = tuple(color == c and enabled for c in ('red', 'green', 'yellow'))
-        now = time.monotonic()
-        if states != self.last_lights or now - self.light_time > .5:
-            self.lights['control'].publish(Bool(data=color != 'off'))
-            for c, value in zip(('red', 'green', 'yellow'), states):
-                self.lights[c].publish(Bool(data=value))
-            self.last_lights, self.light_time = states, now
+        # Tower C selects continuous (HIGH) or hardware blink (LOW), matching
+        # waypoint_navigator. Keep the selected color HIGH in either mode.
+        states = (color != 'off' and mode == 'steady',) + tuple(
+            color == c for c in ('red', 'green', 'yellow'))
+        self.node.publish_light_states(dict(zip(
+            ('control', 'red', 'green', 'yellow'), states)))
 
     def stop(self):
         self.runner.cancel()
-        for publisher in self.lights.values():
-            publisher.publish(Bool(data=False))
-        self.last_lights = None
+        self.node.lights_off()

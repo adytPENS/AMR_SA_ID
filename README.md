@@ -1304,3 +1304,7 @@ Consult the VMX hardware documentation for the physical pin mapping on your boar
 ## License
 
 See [LICENSE](LICENSE).
+
+## GUI monitoring dan kontrol
+
+Jalankan `./scripts/start_robot_dashboard.sh` dari desktop untuk kontrol motor CW/CCW, encoder/RPM, lampu, buzzer pin 9, servo, dan monitor sensor ROS. Lihat [panduan dashboard](docs/ROBOT_DASHBOARD_ID.md) untuk startup hardware dan perilaku stop.

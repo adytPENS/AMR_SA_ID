@@ -1,0 +1,16 @@
+# Setelah M dan START: hijau steady 10 detik, blink 10 detik, lalu semua mati.
+# Tidak ada aksi gerakan; M tetap menginisialisasi servo sesuai program keyboard.
+mission:
+  - action: light
+    color: green
+    mode: steady
+    duration_s: 10
+    timeout_s: 15
+  - action: light
+    color: green
+    mode: blink
+    duration_s: 10
+    timeout_s: 15
+  - action: light
+    color: "off"
+  - action: stop

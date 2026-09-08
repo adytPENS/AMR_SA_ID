@@ -32,7 +32,7 @@ control_server:
     # Push START dan STOP active-low pada DIO 10 dan DIO 11.
     dio:
       enabled: true
-      sensors: ["start_button", "stop_button", "light_control", "light_red", "light_green", "light_yellow"]
+      sensors: ["start_button", "stop_button", "light_control", "light_red", "light_green", "light_yellow", "buzzer"]
       start_button:
         pin: 10
         type: "input"
@@ -43,6 +43,11 @@ control_server:
         type: "input"
         interrupt_edge: "falling"
         debounce_ms: 250
+      buzzer:
+        pin: 9
+        type: "output"
+        interrupt_edge: "none"
+        debounce_ms: 0
       light_control:
         pin: 12
         type: "output"

@@ -1,0 +1,31 @@
+{
+  "schema_version": 1,
+  "lift": {
+    "position": 0.0,
+    "unit": "motor_output_revolutions",
+    "source": "encoder"
+  },
+  "rotate": {
+    "position": 0.0,
+    "unit": "motor_output_revolutions",
+    "source": "encoder"
+  },
+  "wrist": {
+    "position": 0,
+    "unit": "degrees",
+    "source": "commanded_target_not_measured"
+  },
+  "gripper": {
+    "position": 0,
+    "unit": "degrees",
+    "source": "commanded_target_not_measured"
+  },
+  "slide": {
+    "position": null,
+    "source": "manual_reference_at_M",
+    "return_accuracy": "open_loop_not_measured",
+    "timing": {}
+  },
+  "encoder_reference": "current_hardware_session_only",
+  "restore_gripper_when_holding": false
+}

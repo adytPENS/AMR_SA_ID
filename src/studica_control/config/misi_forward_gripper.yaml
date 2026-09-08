@@ -1,0 +1,214 @@
+#cd /home/vmx/studica_ws
+
+#bash scripts/start_full_keyboard.sh \
+#  --human-config /home/vmx/studica_ws/src/studica_control/config/misi_forward_gripper.yaml
+# ping 192.168.50.39
+
+# Posisi robot saat tombol START ditekan
+start_pose:
+  x: 0.0
+  y: 0.0
+  yaw_deg: 0.0
+
+calibration:
+  lift_cm_per_rev: -8.017
+  # Kalibrasi manual: encoder 0.02376253780676052 = 0 derajat,
+  # encoder 0.4666098332963884 = 180 derajat ke kiri (encoder bertambah).
+  # Skala = 180 / (0.4666098332963884 - 0.02376253780676052).
+  rotate_deg_per_rev: 406.46065095866857
+  lift_positive_duty_sign: -1
+  rotate_positive_duty_sign: -1  # Duty negatif = kiri, mengikuti mapping keyboard J.
+
+settings:
+  linear_speed_mps: 0.75
+  angular_speed_rps: 2
+  minimum_angular_speed_rps: 1.2
+  front_stop_cm: 8
+  rotate_duty_percent: 33.3
+  slide_duty_percent: 15
+
+servo_positions:
+  wrist:
+    "on": left_value
+    "off": right_value
+
+  gripper:
+    "on": left_value
+    "off": right_value
+
+mission:
+
+  - action: light
+    color: green
+    mode: steady
+
+  - action: forward
+    until:
+      travel_cm: 120
+    speed_mps: 0.30
+    timeout_s: 20
+
+  - action: turn
+    direction: left
+    angle_deg: 90
+    timeout_s: 15
+
+  - action: forward
+    until:
+      travel_cm: 310
+    speed_mps: 0.30
+    timeout_s: 20
+
+  - action: turn
+    direction: left
+    angle_deg: 90
+    timeout_s: 15
+
+  - action: forward
+    until:
+      travel_cm: 100
+    speed_mps: 0.30
+    timeout_s: 20
+
+  - action: light
+    color: "off"
+    mode: steady 
+
+
+
+  
+
+
+  - action: light
+    color: yellow
+    mode: blink
+
+  - action: turn
+    direction: left
+    angle_deg: 90
+    timeout_s: 15
+
+  - action: light
+    color: "off"
+    mode: steady 
+
+  - action: turn
+    direction: left
+    angle_deg: 90
+    timeout_s: 15
+
+  - action: forward
+    until:
+      travel_cm: 120
+    speed_mps: 0.30
+    timeout_s: 20
+
+
+
+  - action: turn
+    direction: right
+    angle_deg: 90
+    timeout_s: 15
+
+  - action: forward
+    until:
+      travel_cm: 270
+    speed_mps: 0.30
+    timeout_s: 20
+
+  - action: light
+    color: yellow
+    mode: blink
+
+  - action: turn
+    direction: right
+    angle_deg: 90
+    timeout_s: 15
+
+  - action: light
+    color: "off"
+    mode: steady 
+
+  - action: forward
+    until:
+      travel_cm: 120
+    speed_mps: 0.30
+    timeout_s: 20
+
+  - action: light
+    color: yellow
+    mode: blink
+
+  - action: turn
+    direction: right
+    angle_deg: 90
+    timeout_s: 15
+
+  - action: light
+    color: "off"
+    mode: steady 
+
+  - action: turn
+    direction: right
+    angle_deg: 90
+    timeout_s: 15
+
+  - action: forward
+    until:
+      travel_cm: 120
+    speed_mps: 0.30
+    timeout_s: 20
+
+  - action: turn
+    direction: right
+    angle_deg: 90
+    timeout_s: 15
+
+  - action: turn
+    direction: right
+    angle_deg: 90
+    timeout_s: 15
+
+  - action: forward
+    until:
+      travel_cm: 120
+    speed_mps: 0.30
+    timeout_s: 20
+
+  
+
+  
+
+
+
+
+
+  
+
+  
+
+  
+
+  
+
+  
+
+
+ 
+  
+  
+  - action: light
+    color: yellow 
+    mode: blink
+  # Wait for 2 seconds
+  # seconds: 0..300 seconds; timeout_s must be > seconds.
+  - action: wait
+    seconds: 5
+    timeout_s: 8
+  - action: light
+    color: red
+    mode: blink
+
+
+  # 5. Finish the mission; keep the yellow light blinking
+  - action: stop

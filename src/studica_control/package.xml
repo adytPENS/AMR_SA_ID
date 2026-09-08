@@ -47,6 +47,8 @@
   <exec_depend>python3-opencv</exec_depend>
   <exec_depend>python3-numpy</exec_depend>
   <exec_depend>python3-yaml</exec_depend>
+  <exec_depend>python3-tk</exec_depend>
+  <exec_depend>rosidl_runtime_py</exec_depend>
 
   <export>
     <build_type>ament_cmake</build_type>

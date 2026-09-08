@@ -1,7 +1,7 @@
 # Target sudut derajat: R/T wrist, Y/U EoF.
 wrist:
-  left_value: 135.0
-  right_value: -125.0
+  left_value: 134.0
+  right_value: -119.0
 eof:
-  left_value: 130.0
-  right_value: -69.0
+  left_value: 131.0
+  right_value: -65.0
