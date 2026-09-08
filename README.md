@@ -1,5 +1,7 @@
 # Studica Robotics ROS2 Driver
 
+Clone GitHub dan build VMX baru: [Tutorial Bahasa Indonesia](docs/CLONE_BUILD_VMX_ID.md).
+
 USB installer: [English deployment kit](deployment/README.md).
 
 Setup VMX baru / transfer workspace: [Panduan instalasi lengkap Bahasa Indonesia](docs/VMX_STANDARD_SETUP_ID.md).

@@ -1,5 +1,7 @@
 # Setup VMX standar untuk studica_ws
 
+Untuk mengambil program langsung dari GitHub, ikuti [tutorial clone dan build VMX baru](CLONE_BUILD_VMX_ID.md), termasuk pengambilan source Orbbec terpisah.
+
 Panduan berdasarkan source project ini, ditinjau 6 September 2026. Target yang
 terlihat pada mesin pengembangan: Ubuntu 22.04, ARM64, ROS 2 Humble. Jangan
 menganggap semua image Studica sudah berisi versi OS, ROS, dan SDK yang sama.
